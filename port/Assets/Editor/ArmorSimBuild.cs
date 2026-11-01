@@ -33,6 +33,7 @@ public static class ArmorSimBuild
         output = Path.GetFullPath(output);
 
         ArmorSimProjectSetup.Apply(bundleId);
+        ArmorSimTmpFix.Apply();
 
         string[] scenes = EditorBuildSettings.scenes
             .Where(scene => scene.enabled)
