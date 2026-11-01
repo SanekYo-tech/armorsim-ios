@@ -32,7 +32,17 @@ public class LocalizedLabel : MonoBehaviour
 		_tmp = GetComponent<TMP_Text>();
 		if (_tmp == null)
 		{
+			// MenuTheme attaches LocalizedLabel to the button root while the
+			// actual label lives on a child object.
+			_tmp = GetComponentInChildren<TMP_Text>(includeInactive: true);
+		}
+		if (_tmp == null)
+		{
 			_legacy = GetComponent<Text>();
+			if (_legacy == null)
+			{
+				_legacy = GetComponentInChildren<Text>(includeInactive: true);
+			}
 		}
 	}
 
