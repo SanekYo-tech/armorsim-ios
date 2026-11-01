@@ -26,7 +26,8 @@ The original game has no source available. Every C# class, method, constant, and
 | Metric | Value |
 |--------|-------|
 | Total C# files | 810 |
-| Fully restored | 752+ |
+| Stubs remaining | **0** |
+| Files rewritten from IL | 460 |
 | Methods recovered | ~9,600 |
 | Original binary size | 132 MB (RAR5) |
 | Restored project size | 118 MB |
@@ -54,6 +55,8 @@ The original game has no source available. Every C# class, method, constant, and
 - Local achievement/workshop backends (no Steam dependency)
 
 ## Building the .ipa
+
+Unity packages used by the project: `com.unity.ugui` 2.0.0 (UGUI + TextMeshPro), `com.unity.inputsystem` 1.20.1, `com.unity.mathematics` 1.3.3.
 
 The project builds via **GitHub Actions** (`.github/workflows/ios.yml`):
 

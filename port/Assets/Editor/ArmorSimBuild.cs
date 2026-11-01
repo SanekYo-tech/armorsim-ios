@@ -10,6 +10,30 @@ public static class ArmorSimBuild
 {
     public static void BuildiOS()
     {
+        string bundleId = GetArgument("-armorsimBundleId");
+        if (string.IsNullOrWhiteSpace(bundleId))
+        {
+            bundleId = Environment.GetEnvironmentVariable("IOS_BUNDLE_ID");
+        }
+        if (string.IsNullOrWhiteSpace(bundleId))
+        {
+            throw new Exception("Bundle ID не задан: передай -armorsimBundleId <id> или установи переменную окружения IOS_BUNDLE_ID.");
+        }
+        bundleId = bundleId.Trim();
+
+        string output = GetArgument("-armorsimOutputPath");
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            output = Environment.GetEnvironmentVariable("ARMORSIM_XCODE_PATH");
+        }
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            output = Path.GetFullPath("Build/Xcode");
+        }
+        output = Path.GetFullPath(output);
+
+        ArmorSimProjectSetup.Apply(bundleId);
+
         string[] scenes = EditorBuildSettings.scenes
             .Where(scene => scene.enabled)
             .Select(scene => scene.path)
@@ -17,8 +41,8 @@ public static class ArmorSimBuild
 
         PlayerSettings.companyName = "GalimovDynamics";
         PlayerSettings.productName = "ArmorSim";
-        PlayerSettings.SetScriptingBackend(NamedBuildTarget.IOS, ScriptingImplementation.IL2CPP);
-        PlayerSettings.SetArchitecture(NamedBuildTarget.IOS, 1);
+        PlayerSettings.SetScriptingBackend(NamedBuildTarget.iOS, ScriptingImplementation.IL2CPP);
+        PlayerSettings.SetArchitecture(NamedBuildTarget.iOS, 1);
         PlayerSettings.iOS.sdkVersion = iOSSdkVersion.DeviceSDK;
         PlayerSettings.iOS.targetOSVersionString = "15.0";
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
@@ -32,11 +56,6 @@ public static class ArmorSimBuild
             throw new Exception("Не удалось переключиться на iOS. Проверь установку iOS Build Support.");
         }
 
-        string output = Environment.GetEnvironmentVariable("ARMORSIM_XCODE_PATH");
-        if (string.IsNullOrEmpty(output))
-        {
-            output = Path.GetFullPath("Build/Xcode");
-        }
         Directory.CreateDirectory(output);
 
         BuildPlayerOptions options = new BuildPlayerOptions
@@ -54,5 +73,25 @@ public static class ArmorSimBuild
         }
 
         Debug.Log($"[ArmorSimBuild] Xcode project exported to {output}");
+    }
+
+    private static string GetArgument(string name)
+    {
+        string[] args = Environment.GetCommandLineArgs();
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (!string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string value = args[i + 1];
+            if (!string.IsNullOrWhiteSpace(value) && !value.StartsWith("-", StringComparison.Ordinal))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 }

@@ -2,8 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -1197,7 +1199,37 @@ public static class SuperTapeRecorder
 
 		public static RunData FromFreshBake(SuperShot.KeyframeContext ctx, float rodDiameterM)
 		{
-			return null;
+			SuperParticles particles = ctx.baked.particles;
+			RunData rd = new RunData();
+			rd.n = particles.count;
+			rd.bodies = ctx.baked.bodies.ToArray();
+			rd.gridLo = ctx.gridLo;
+			rd.gridHi = ctx.gridHi;
+			rd.spacing = ctx.baked.spacing;
+			rd.rodDiameterM = rodDiameterM;
+			rd.v0 = new float[rd.n];
+			rd.mass = new float[rd.n];
+			for (int i = 0; i < rd.n; i++)
+			{
+				rd.v0[i] = particles.V0[i];
+				rd.mass[i] = particles.mass[i];
+			}
+			SuperBaker.Body plate = rd.bodies[rd.bodies.Length - 1];
+			rd.plate0 = new Vector3[plate.count];
+			for (int j = 0; j < plate.count; j++)
+			{
+				rd.plate0[j] = particles.x[plate.start + j];
+			}
+			double ke = 0.0;
+			SuperBaker.Body rod = rd.bodies[0];
+			for (int k = 0; k < rod.count; k++)
+			{
+				int idx = rod.start + k;
+				Vector3 v = particles.v[idx];
+				ke += 0.5 * particles.mass[idx] * ((double)v.x * v.x + (double)v.y * v.y + (double)v.z * v.z);
+			}
+			rd.rodKe0 = ke;
+			return rd;
 		}
 	}
 
@@ -1223,6 +1255,15 @@ public static class SuperTapeRecorder
 
 		public Snapshot(int n)
 		{
+			pos = new Vector3[n];
+			vel = new Vector3[n];
+			dmg = new float[n];
+			pf = new float[5][];
+			for (int i = 0; i < 5; i++)
+			{
+				pf[i] = new float[n];
+			}
+			inside = new bool[n];
 		}
 	}
 
@@ -1236,6 +1277,8 @@ public static class SuperTapeRecorder
 
 		public FieldSource(int n)
 		{
+			scal = new Vector4[n];
+			dev = new SuperMat3[n];
 		}
 	}
 
@@ -1286,6 +1329,9 @@ public static class SuperTapeRecorder
 
 		public FrameTail(int nBodies)
 		{
+			kineticJ = new double[nBodies];
+			massInDomainKg = new double[nBodies];
+			momentum = new Vector3[nBodies];
 		}
 	}
 
@@ -1344,6 +1390,29 @@ public static class SuperTapeRecorder
 
 		internal void _003CRecordCore_003Eb__6(long ticks)
 		{
+			s.stages.Add(SuperHookStages.Stage.ReconWait, ticks);
+		}
+
+		internal void _003CRecordCore_003Eg__EnqueueHooked_007C3(Snapshot sn, SuperShot.KeyframeContext c, long t, long spentTicks)
+		{
+			int frame = pipe.Enqueue(sn);
+			s.stages.HookDone(s.stages.Lap(SuperHookStages.Stage.Enqueue, t) - t + spentTicks);
+			bool flag = false;
+			if (ckScene != null && c.step < c.stepsTotal)
+			{
+				if (SuperCheckpoint.EveryFrames > 0)
+				{
+					flag = frame % SuperCheckpoint.EveryFrames == 0;
+				}
+				else
+				{
+					flag = sw.Elapsed.TotalSeconds - lastCkptS >= (double)SuperCheckpoint.IntervalS;
+				}
+			}
+			if (flag)
+			{
+				pipe.RequestCheckpoint(frame, c);
+			}
 		}
 	}
 
@@ -1386,19 +1455,149 @@ public static class SuperTapeRecorder
 
 		internal void _003CRecordCore_003Eb__0(SuperShot.KeyframeContext ctx)
 		{
+			_003C_003Ec__DisplayClass65_0 displayClass = CS_0024_003C_003E8__locals1;
+			if (displayClass == null || displayClass.ckScene == null || displayClass.s == null)
+			{
+				return;
+			}
+			bool due;
+			if (SuperCheckpoint.EveryFrames > 0)
+			{
+				due = displayClass.s.frames % SuperCheckpoint.EveryFrames == 0;
+			}
+			else
+			{
+				due = displayClass.sw.Elapsed.TotalSeconds - displayClass.lastCkptS >= (double)SuperCheckpoint.IntervalS;
+			}
+			if (!due)
+			{
+				return;
+			}
+			if (ckWrite != null)
+			{
+				if (!ckWrite.IsCompleted)
+				{
+					return;
+				}
+				ckWrite = null;
+			}
+			displayClass.lastCkptS = displayClass.sw.Elapsed.TotalSeconds;
+			try
+			{
+				long tapeBytes = ((displayClass.tape != null) ? displayClass.tape.Tell() : 0L);
+				SuperCheckpoint.Data data = SuperCheckpoint.Capture(ctx, displayClass.ckScene, displayClass.drive, tapeBytes, displayClass.s.frames, displayClass.s.maxVertsFrame, displayClass.s.maxRawVertsFrame);
+				ckWrite = Task.Run(delegate
+				{
+					SuperCheckpoint.Write(data);
+				});
+			}
+			catch (Exception exception)
+			{
+				Debug.LogWarning("[лента] контрольная точка не записана: " + exception.Message);
+			}
 		}
 
 		internal void _003CRecordCore_003Eb__1(SuperShot.KeyframeContext ctx)
 		{
+			_003C_003Ec__DisplayClass65_0 displayClass = CS_0024_003C_003E8__locals1;
+			if (displayClass == null || ctx.kernel == null || ctx.baked == null || ctx.baked.particles == null)
+			{
+				return;
+			}
+			if (rd == null)
+			{
+				float rodDia;
+				if (displayClass.kind == Kind.Jet)
+				{
+					rodDia = displayClass.jet.diameterM;
+				}
+				else if (displayClass.kind == Kind.Shell)
+				{
+					rodDia = displayClass.shell.diameterM;
+				}
+				else
+				{
+					rodDia = displayClass.rod.diameterM;
+				}
+				rd = RunData.FromFreshBake(ctx, rodDia);
+				serialSnap = new Snapshot(rd.n);
+				fieldSrc = new FieldSource(rd.n);
+				displayClass.s.particles = rd.n;
+				if (displayClass.tape == null)
+				{
+					int bodyCount = ctx.baked.bodies.Count;
+					string[] bodyNames = new string[bodyCount];
+					for (int i = 0; i < bodyCount; i++)
+					{
+						bodyNames[i] = ctx.baked.bodies[i].name ?? "?";
+					}
+					string scene = Path.GetFileNameWithoutExtension(displayClass.s.path);
+					displayClass.tape = new SuperTape.Writer(displayClass.s.path, displayClass.cadenceS, scene, bodyNames, SuperReconstruct.FieldNames, SuperReconstruct.FieldUnits, displayClass.decor);
+				}
+			}
+			Snapshot snapshot = serialSnap;
+			snapshot.index = displayClass.s.frames;
+			snapshot.simTimeS = ctx.simTimeS;
+			ctx.kernel.Download(snapshot.pos, snapshot.vel, fieldSrc.scal);
+			ctx.kernel.DownloadDeviator(fieldSrc.dev);
+			ctx.kernel.DownloadDamage(snapshot.dmg);
+			SuperReconstruct.ParticleFields(rd.n, snapshot.vel, fieldSrc.scal, fieldSrc.dev, snapshot.dmg, 0, snapshot.pf);
+			SuperTape.Frame frame = BuildFrame(rd, snapshot, 1, displayClass.s.stages, out FrameStats stats);
+			ApplyStats(displayClass.s, stats);
+			SuperTape.Encoded encoded = displayClass.tape.EncodeFrame(frame);
+			displayClass.tape.WriteEncoded(encoded);
+			displayClass.s.frames++;
+			displayClass.s.bytesFramesCounted++;
+			displayClass.s.bytesLatticeMean += (double)stats.bytesLattice;
+			displayClass.s.bytesMeshMean += (double)stats.bytesMesh;
+			displayClass.s.bytesFieldsMean += (double)stats.bytesFields;
+			displayClass.s.bytesPayloadMean += (double)encoded.canonicalLen;
+			displayClass.s.bytesHonestMean += (double)((long)rd.n * 57 + stats.bytesLattice + stats.bytesMesh + stats.bytesFields + stats.bytesDebris + encoded.canonicalLen);
+			displayClass.s.fileBytes = displayClass.tape.Tell();
+			if (stats.bytesLattice > displayClass.s.bytesLatticeMax)
+			{
+				displayClass.s.bytesLatticeMax = stats.bytesLattice;
+			}
+			if (stats.bytesMesh > displayClass.s.bytesMeshMax)
+			{
+				displayClass.s.bytesMeshMax = stats.bytesMesh;
+			}
+			if (stats.bytesFields > displayClass.s.bytesFieldsMax)
+			{
+				displayClass.s.bytesFieldsMax = stats.bytesFields;
+			}
+			if (encoded.canonicalLen > displayClass.s.bytesPayloadMax)
+			{
+				displayClass.s.bytesPayloadMax = encoded.canonicalLen;
+			}
+			if (displayClass.s.frames % 256 == 0)
+			{
+				displayClass.tape.FlushAndTell();
+			}
+			displayClass.onFrame?.Invoke();
+			runCheckpoint?.Invoke(ctx);
 		}
 
 		internal void _003CRecordCore_003Eb__2()
 		{
+			Task task = ckWrite;
+			if (task != null)
+			{
+				try
+				{
+					task.Wait();
+				}
+				catch (Exception exception)
+				{
+					Debug.LogWarning("[лента] запись контрольной точки завершилась ошибкой: " + exception.Message);
+				}
+				ckWrite = null;
+			}
 		}
 
 		internal bool _003CRecordCore_003Eb__4()
 		{
-			return false;
+			return true;
 		}
 	}
 
@@ -1472,7 +1671,7 @@ public static class SuperTapeRecorder
 			[DebuggerHidden]
 			get
 			{
-				return null;
+				return _003C_003E2__current;
 			}
 		}
 
@@ -1481,23 +1680,169 @@ public static class SuperTapeRecorder
 			[DebuggerHidden]
 			get
 			{
-				return null;
+				return _003C_003E2__current;
 			}
 		}
 
 		[DebuggerHidden]
 		public _003CRecordCore_003Ed__65(int _003C_003E1__state)
 		{
+			this._003C_003E1__state = _003C_003E1__state;
 		}
 
 		[DebuggerHidden]
 		void IDisposable.Dispose()
 		{
+			if (_003Cinners.TryGetValue(this, out IEnumerator value))
+			{
+				_003Cinners.Remove(this);
+				(value as IDisposable)?.Dispose();
+			}
 		}
+
+		private static readonly ConditionalWeakTable<_003CRecordCore_003Ed__65, IEnumerator> _003Cinners = new ConditionalWeakTable<_003CRecordCore_003Ed__65, IEnumerator>();
 
 		private bool MoveNext()
 		{
+			if (_003C_003E1__state == -1)
+			{
+				return false;
+			}
+			if (!_003Cinners.TryGetValue(this, out IEnumerator value))
+			{
+				value = _003CRecordCoreBody(this);
+				_003Cinners.Add(this, value);
+			}
+			if (value.MoveNext())
+			{
+				_003C_003E2__current = null;
+				return true;
+			}
+			_003Cinners.Remove(this);
+			(value as IDisposable)?.Dispose();
+			_003C_003E1__state = -1;
 			return false;
+		}
+
+		private static IEnumerator _003CRecordCoreBody(_003CRecordCore_003Ed__65 d)
+		{
+			_003C_003Ec__DisplayClass65_0 c0 = new _003C_003Ec__DisplayClass65_0();
+			c0.drive = d.drive;
+			c0.kind = d.kind;
+			c0.jet = d.jet;
+			c0.shell = d.shell;
+			c0.rod = d.rod;
+			c0.resume = d.resume;
+			c0.cadenceS = d.cadenceS;
+			c0.plates = d.plates;
+			c0.decor = d.decor;
+			c0.mode = (d.pipeline ?? (d.gameDomain ? GamePipeline : Pipeline));
+			c0.onFrame = d.onFrame;
+			c0.onPump = d.onPump;
+			c0.composite = d.kind == Kind.Shell;
+			c0.s = new Summary();
+			c0.s.path = Path.GetFullPath(Path.Combine(d.dir ?? TapeDir, d.tapeName));
+			c0.s.baseFrames = ((d.resume != null) ? d.resume.frames : 0);
+			c0.s.frames = c0.s.baseFrames;
+			c0.s.pipeline = c0.mode;
+			c0.s.workers = WorkersOf(c0.mode);
+			c0.s.stages = new SuperHookStages();
+			c0.s.fieldsPath = "cpu";
+			c0.s.fieldsPathWhy = "серийная запись кадров";
+			c0.sw = Stopwatch.StartNew();
+			c0.lastCkptS = 0.0;
+			c0.wMin0 = 0;
+			c0.ioMin0 = 0;
+			if (d.paced ?? (d.gameDomain ? GamePaced : Paced))
+			{
+				c0.pacer = new SuperStepPacer();
+			}
+			c0.s.pacer = c0.pacer;
+			if (d.checkpoint)
+			{
+				SuperCheckpoint.Scene scene = new SuperCheckpoint.Scene();
+				scene.kind = (int)d.kind;
+				scene.rod = d.rod;
+				scene.jet = d.jet;
+				scene.plates = new List<SuperPlateSpec>(d.plates);
+				scene.spacing = d.spacing;
+				scene.durationS = d.durationS;
+				scene.marginM = d.marginM;
+				scene.cadenceS = d.cadenceS;
+				scene.tapeTmpPath = c0.s.path;
+				scene.tapeDir = Path.GetDirectoryName(c0.s.path);
+				scene.tapeName = Path.GetFileName(c0.s.path);
+				scene.drives = new SuperCheckpoint.DriveSpec[0];
+				scene.probeEveryS = SuperEraDrive.ProbeEveryS;
+				c0.ckScene = scene;
+			}
+			d._003C_003E8__2 = c0;
+			_003C_003Ec__DisplayClass65_1 c1 = new _003C_003Ec__DisplayClass65_1();
+			c1.CS_0024_003C_003E8__locals1 = c0;
+			c1.runCheckpoint = c1._003CRecordCore_003Eb__0;
+			c1.finishHalf = c1._003CRecordCore_003Eb__2;
+			d._003C_003E8__1 = c1;
+			SuperShot.RunBox shotBox = new SuperShot.RunBox();
+			shotBox.abortFrame = -1;
+			shotBox.abortedAtStep = -1;
+			d._003CshotBox_003E5__5 = shotBox;
+			SuperShot.Resume resume = ((d.resume != null) ? SuperCheckpoint.ToResume(d.resume) : null);
+			SuperDecor superDecor = ((d.decor != null) ? SuperDecor.Decode(d.decor) : null);
+			d._003Cshot_003E5__4 = SuperShot.RunCore(d.cs, d.rod, d.shell, d.jet, (SuperShot.Proj)(int)d.kind, d.plates, d.spacing, d.durationS, SuperScatterRoute.FixedPointAtomics, 0, c1._003CRecordCore_003Eb__1, Mathf.Max(MinCadenceS, d.cadenceS), c0.drive, null, resume, shotBox, c1._003CRecordCore_003Eb__4, c0.pacer, superDecor);
+			bool savedGameDomain = SuperShot.GameSolverDomain;
+			SuperShot.GameSolverDomain = d.gameDomain;
+			try
+			{
+				while (d._003Cshot_003E5__4.MoveNext())
+				{
+					c0.s.stepNow = shotBox.stepNow;
+					c0.s.stepsTotal = shotBox.stepsTotal;
+					d.onPump?.Invoke();
+					yield return null;
+				}
+			}
+			finally
+			{
+				SuperShot.GameSolverDomain = savedGameDomain;
+			}
+			c1.finishHalf?.Invoke();
+			if (c0.tape != null)
+			{
+				c0.tape.FlushToDisk();
+				c0.tape.Dispose();
+			}
+			c0.s.shot = shotBox.r;
+			if (shotBox.r.particles > 0)
+			{
+				c0.s.particles = shotBox.r.particles;
+			}
+			c0.s.ok = shotBox.r.ok;
+			c0.s.failure = shotBox.r.failure;
+			c0.s.failureKey = shotBox.r.failureKey;
+			c0.s.failureArgs = shotBox.r.failureArgs;
+			c0.s.failClass = shotBox.r.failClass;
+			c0.s.wallS = c0.sw.Elapsed.TotalSeconds;
+			c0.s.stepsTotal = shotBox.stepsTotal;
+			c0.s.stepNow = shotBox.stepNow;
+			c0.s.framesBuilt = c0.s.frames - c0.s.baseFrames;
+			if (c0.s.bytesFramesCounted > 0)
+			{
+				c0.s.bytesLatticeMean /= (double)c0.s.bytesFramesCounted;
+				c0.s.bytesMeshMean /= (double)c0.s.bytesFramesCounted;
+				c0.s.bytesFieldsMean /= (double)c0.s.bytesFramesCounted;
+				c0.s.bytesPayloadMean /= (double)c0.s.bytesFramesCounted;
+				c0.s.bytesHonestMean /= (double)c0.s.bytesFramesCounted;
+			}
+			try
+			{
+				c0.s.fileBytes = (File.Exists(c0.s.path) ? new FileInfo(c0.s.path).Length : 0L);
+			}
+			catch (Exception)
+			{
+				c0.s.fileBytes = 0L;
+			}
+			LastSummary = c0.s;
+			d.box.s = c0.s;
 		}
 
 		bool IEnumerator.MoveNext()
@@ -1508,11 +1853,30 @@ public static class SuperTapeRecorder
 
 		private void _003C_003Em__Finally1()
 		{
+			_003C_003E1__state = -1;
+			IEnumerator enumerator = _003Cshot_003E5__4;
+			if (enumerator is IDisposable disposable)
+			{
+				disposable.Dispose();
+			}
+			_003C_003Ec__DisplayClass65_0 displayClass = _003C_003E8__2;
+			if (displayClass?.tape != null)
+			{
+				try
+				{
+					displayClass.tape.FlushToDisk();
+					displayClass.tape.Dispose();
+				}
+				catch (Exception)
+				{
+				}
+			}
 		}
 
 		[DebuggerHidden]
 		void IEnumerator.Reset()
 		{
+			throw new NotSupportedException();
 		}
 	}
 
@@ -1592,93 +1956,559 @@ public static class SuperTapeRecorder
 
 	public static bool GamePaced;
 
-	public static int LiveSnapshots => 0;
+	static SuperTapeRecorder()
+	{
+		ForceQ = -1;
+		KRaiseNeedsHeadroom = false;
+		TapeFlushEveryS = 2.0;
+		SabotageNoBackpressure = false;
+		DegenerateFrame = -1;
+		DegenerateLock = new object();
+		AbortOnDegenerateFrame = true;
+		SabotageAbortCeilingMps = 0f;
+		DegenerateParticle = -1;
+		DegenerateBody = -1;
+		SabotageThrowAtFrame = -1;
+		Pipeline = PipelineMode.Serial;
+		GamePipeline = PipelineMode.Parallel;
+		Paced = false;
+		GamePaced = true;
+	}
 
-	public static int LiveTasks => 0;
+	public static int LiveSnapshots => _liveSnapshots;
 
-	public static int PipelineBuilding => 0;
+	public static int LiveTasks => _liveTasks;
 
-	public static string TapeDir => null;
+	public static int PipelineBuilding => _building;
 
-	public static string FixtureDir => null;
+	public static string TapeDir => Path.Combine(Application.persistentDataPath, "SuperTapes");
+
+	public static string FixtureDir => Path.Combine(TapeDir, "fixtures");
 
 	public static Summary LastSummary { get; private set; }
 
 	public static long PerFrameBytes(int n, long reconstructionCells, long rawVerts, long payloadBytes, int dop)
 	{
-		return 0L;
+		return (long)n * 57 + (reconstructionCells + rawVerts * 6) * 16 + ((dop >= 3) ? ((long)n * 56) : 0) + payloadBytes;
 	}
 
 	public static int PipelineVersionOf(PipelineMode m, bool paced = false)
 	{
+		if (m == PipelineMode.Parallel)
+		{
+			return paced ? 3 : 1;
+		}
 		return 0;
 	}
 
 	public static int WorkersOf(PipelineMode m)
 	{
+		if (m == PipelineMode.Parallel)
+		{
+			return Math.Max(1, Environment.ProcessorCount - 2);
+		}
 		return 0;
 	}
 
 	public static Summary Record(ComputeShader cs, SuperRodSpec rod, SuperPlateSpec plate, float spacing, float durationS, string tapeName, float marginM = 0f, float cadenceS = 2E-06f, string dir = null)
 	{
-		return null;
+		return Record(cs, rod, default(SuperShellSpec), default(SuperJetSpec), Kind.Rod, new SuperPlateSpec[1] { plate }, spacing, durationS, tapeName, marginM, cadenceS, dir, null, null);
 	}
 
 	public static Summary Record(ComputeShader cs, SuperShellSpec shell, IList<SuperPlateSpec> plates, float spacing, float durationS, string tapeName, float marginM = 0f, float cadenceS = 2E-06f, string dir = null, Action onFrame = null, SuperEraDrive drive = null)
 	{
-		return null;
+		return Record(cs, default(SuperRodSpec), shell, default(SuperJetSpec), Kind.Shell, plates, spacing, durationS, tapeName, marginM, cadenceS, dir, onFrame, drive);
 	}
 
 	public static Summary Record(ComputeShader cs, SuperRodSpec rod, IList<SuperPlateSpec> plates, float spacing, float durationS, string tapeName, float marginM = 0f, float cadenceS = 2E-06f, string dir = null, Action onFrame = null, SuperEraDrive drive = null, bool checkpoint = false, SuperCheckpoint.Data resume = null, byte[] decor = null)
 	{
-		return null;
+		return Record(cs, rod, default(SuperShellSpec), default(SuperJetSpec), Kind.Rod, plates, spacing, durationS, tapeName, marginM, cadenceS, dir, onFrame, drive, checkpoint, resume, decor);
 	}
 
 	public static Summary Record(ComputeShader cs, SuperJetSpec jet, IList<SuperPlateSpec> plates, float spacing, float durationS, string tapeName, float marginM = 0f, float cadenceS = 2E-06f, string dir = null, Action onFrame = null, SuperEraDrive drive = null, bool checkpoint = false, SuperCheckpoint.Data resume = null)
 	{
-		return null;
+		return Record(cs, default(SuperRodSpec), default(SuperShellSpec), jet, Kind.Jet, plates, spacing, durationS, tapeName, marginM, cadenceS, dir, onFrame, drive, checkpoint, resume);
 	}
 
 	private static Summary Record(ComputeShader cs, SuperRodSpec rod, SuperShellSpec shell, SuperJetSpec jet, Kind kind, IList<SuperPlateSpec> plates, float spacing, float durationS, string tapeName, float marginM, float cadenceS, string dir, Action onFrame, SuperEraDrive drive, bool checkpoint = false, SuperCheckpoint.Data resume = null, byte[] decor = null)
 	{
-		return null;
+		if (resume != null)
+		{
+			string refusal = SuperSolveJob.ResumeRefusal(resume);
+			if (refusal != null)
+			{
+				throw new InvalidOperationException(refusal);
+			}
+		}
+		RecBox box = new RecBox();
+		IEnumerator iterator = RecordCore(cs, rod, shell, jet, kind, plates, spacing, durationS, tapeName, marginM, cadenceS, dir, onFrame, drive, checkpoint, resume, box, null, null, null, gameDomain: false, decor);
+		while (iterator.MoveNext())
+		{
+		}
+		return box.s;
 	}
 
 	[IteratorStateMachine(typeof(_003CRecordCore_003Ed__65))]
 	internal static IEnumerator RecordCore(ComputeShader cs, SuperRodSpec rod, SuperShellSpec shell, SuperJetSpec jet, Kind kind, IList<SuperPlateSpec> plates, float spacing, float durationS, string tapeName, float marginM, float cadenceS, string dir, Action onFrame, SuperEraDrive drive, bool checkpoint, SuperCheckpoint.Data resume, RecBox box, Action onPump = null, PipelineMode? pipeline = null, bool? paced = null, bool gameDomain = false, byte[] decor = null)
 	{
-		return null;
+		_003CRecordCore_003Ed__65 d = new _003CRecordCore_003Ed__65(0);
+		d.cs = cs;
+		d.rod = rod;
+		d.shell = shell;
+		d.jet = jet;
+		d.kind = kind;
+		d.plates = plates;
+		d.spacing = spacing;
+		d.durationS = durationS;
+		d.tapeName = tapeName;
+		d.marginM = marginM;
+		d.cadenceS = cadenceS;
+		d.dir = dir;
+		d.onFrame = onFrame;
+		d.drive = drive;
+		d.checkpoint = checkpoint;
+		d.resume = resume;
+		d.box = box;
+		d.onPump = onPump;
+		d.pipeline = pipeline;
+		d.paced = paced;
+		d.gameDomain = gameDomain;
+		d.decor = decor;
+		return d;
 	}
 
 	private static string DescribePlates(IList<SuperPlateSpec> plates)
 	{
-		return null;
+		StringBuilder stringBuilder = new StringBuilder();
+		for (int i = 0; i < plates.Count; i++)
+		{
+			if (i > 0)
+			{
+				stringBuilder.Append(" + ");
+			}
+			SuperPlateSpec p = plates[i];
+			stringBuilder.Append(string.Format("{0} {1:F0} мм β={2:F0}°", p.material, p.thicknessM * 1000f, p.angleXDeg));
+			if (p.hasPose)
+			{
+				stringBuilder.Append(string.Format(" φ={0:F0}° ", SuperScenePose.CutAzimuthDeg(p.poseN)) + string.Format("Δ=({0:F0}, {1:F0}) мм", p.poseCentreM.x * 1000f, p.poseCentreM.y * 1000f));
+			}
+			stringBuilder.Append(p.clampedEdges ? " защ." : " своб.");
+		}
+		return stringBuilder.ToString();
 	}
 
 	private static void CopyReconStats(SuperReconGpu r, Summary s)
 	{
+		SuperReconGpu.ReconStats st = r.Stats;
+		s.reconReadback = st.readback;
+		s.reconSlots = st.slots;
+		s.reconSlotWaits = st.slotWaits;
+		s.reconFramesGpu = st.framesGpu;
+		s.reconVertexRequests = st.vertexRequests;
+		s.reconSlotWaitS = st.slotWaitS;
+		s.reconHookMsMean = st.hookMsMean;
+		s.reconHookMsMax = st.hookMsMax;
+		s.reconHookGpuMs = st.hookGpuMsSum;
+		s.reconReadbackMsP95 = st.readbackMsP95;
+		s.reconVramMB = st.vramMB;
+		s.reconKeyMismatch = st.keyMismatch;
+		s.reconNodeMismatch = st.nodeMismatch;
+		s.reconKeysChecked = st.keysChecked;
+		s.reconAabbChecks = st.aabbChecks;
+		s.reconSignedZero = st.signedZeroDiffs;
+		s.reconPipeWaits = st.pipeWaits;
+		s.reconPipeWaitS = st.pipeWaitS;
 	}
 
 	private static string ReconPassport(Summary s)
 	{
-		return null;
+		if (s.fieldsPath == "gpu")
+		{
+			return string.Format(" [поля: GPU, чтение {0}, слотов {1}, ждал слот {2} раз ({3:F1} с), стоял по K {4} раз ({5:F1} с), ", s.reconReadback, s.reconSlots, s.reconSlotWaits, s.reconSlotWaitS, s.reconPipeWaits, s.reconPipeWaitS) + string.Format("крюк {0:F0}/{1:F0} мс, чтение p95 {2:F0} мс, VRAM {3:F0} МБ, ", s.reconHookMsMean, s.reconHookMsMax, s.reconReadbackMsP95, s.reconVramMB) + string.Format("ключей мимо float-клетки {0} из {1}, узлов {2}]", s.reconKeyMismatch, s.reconKeysChecked, s.reconNodeMismatch);
+		}
+		return " [поля: ЦП — " + s.fieldsPathWhy + "]";
 	}
 
 	private static void ApplyStats(Summary s, FrameStats st)
 	{
+		SuperReconstruct.NoteFailedExcluded(st.lastFailedExcluded);
+		if (st.frameVerts > s.maxVertsFrame)
+		{
+			s.maxVertsFrame = st.frameVerts;
+		}
+		if (st.frameRawVerts > s.maxRawVertsFrame)
+		{
+			s.maxRawVertsFrame = st.frameRawVerts;
+		}
 	}
 
 	internal static SuperTape.Frame BuildFrame(RunData rd, Snapshot sn, int dop, SuperHookStages stages, out FrameStats stats)
 	{
-		stats = default;
-		return null;
+		if (SabotageThrowAtFrame >= 0 && sn.index == SabotageThrowAtFrame)
+		{
+			throw new InvalidOperationException("S25 диверсия: бросок при построении кадра " + sn.index);
+		}
+		long t0 = SuperHookStages.Now;
+		int count = rd.n;
+		Vector3[] pos = sn.pos;
+		Vector3[] vel = sn.vel;
+		float[] dmgArr = sn.dmg;
+		Vector3 gridLo = rd.gridLo;
+		Vector3 gridHi = rd.gridHi;
+		float[][] pf = sn.pf;
+		bool[] inside = sn.inside;
+		int nBodies = rd.bodies.Length;
+		SuperTape.Frame frame = new SuperTape.Frame();
+		frame.index = sn.index;
+		frame.simTimeS = sn.simTimeS;
+		frame.bodies = new SuperTape.BodyFrame[nBodies];
+		frame.telemetry = new SuperTape.BodyTelemetry[nBodies];
+		frame.fieldMin = new float[5];
+		frame.fieldMax = new float[5];
+		frame.debrisCount = 0;
+		int FC = 5;
+		if (dop > 1)
+		{
+			int per = (count + dop * 4 - 1) / (dop * 4);
+			float[] cmn = new float[per * FC];
+			float[] cmx = new float[per * FC];
+			SuperParallel.For(0, dop * 4, dop, delegate(int ch)
+			{
+				int from = Math.Min(count, ch * per);
+				int to = Math.Min(count, (ch + 1) * per);
+				InsideAndRange(from, to, pos, gridLo, gridHi, inside, pf, cmn, cmx, FC * ch);
+			});
+			for (int ch = 0; ch < FC; ch++)
+			{
+				float mn = float.MaxValue;
+				float mx = float.MinValue;
+				for (int j = 0; j < per; j++)
+				{
+					float v = cmn[j * FC + ch];
+					if (v < mn)
+					{
+						mn = v;
+					}
+					v = cmx[j * FC + ch];
+					if (v > mx)
+					{
+						mx = v;
+					}
+				}
+				frame.fieldMin[ch] = mn;
+				frame.fieldMax[ch] = mx;
+			}
+		}
+		else
+		{
+			for (int i = 0; i < count; i++)
+			{
+				Vector3 v2 = pos[i];
+				inside[i] = v2.x >= gridLo.x && v2.y >= gridLo.y && v2.z >= gridLo.z && gridHi.x >= v2.x && gridHi.y >= v2.y && gridHi.z >= v2.z;
+			}
+			for (int ch2 = 0; ch2 < 5; ch2++)
+			{
+				float mn2 = float.MaxValue;
+				float mx2 = float.MinValue;
+				for (int i2 = 0; i2 < count; i2++)
+				{
+					if (inside[i2])
+					{
+						float v3 = pf[ch2][i2];
+						if (v3 < mn2)
+						{
+							mn2 = v3;
+						}
+						if (v3 > mx2)
+						{
+							mx2 = v3;
+						}
+					}
+				}
+				frame.fieldMin[ch2] = mn2;
+				frame.fieldMax[ch2] = mx2;
+			}
+		}
+		stages.Lap(SuperHookStages.Stage.Fields, t0);
+		FrameTail tail = new FrameTail(nBodies);
+		Task tailTask = ((dop >= 2) ? Task.Factory.StartNew(delegate
+		{
+			ComputeTail(rd, pos, vel, dmgArr, pf, inside, count, nBodies, sn.index, stages, tail);
+		}, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default) : null);
+		SuperReconstruct.Body[] recs = new SuperReconstruct.Body[nBodies];
+		if (sn.recon != null && dop < 1)
+		{
+			throw new InvalidOperationException("S39: путь полей GPU — только у конвейера (dop ⩾ 1)");
+		}
+		if (dop > 1)
+		{
+			SuperParallel.For(0, nBodies, dop, delegate(int b)
+			{
+				recs[b] = SuperReconstruct.Reconstruct(rd.bodies[b], pos, rd.v0, pf, gridLo, gridHi, rd.spacing, true, dmgArr, stages, dop, sn.recon, b);
+			});
+		}
+		else
+		{
+			for (int b2 = 0; b2 < nBodies; b2++)
+			{
+				recs[b2] = SuperReconstruct.Reconstruct(rd.bodies[b2], pos, rd.v0, pf, gridLo, gridHi, rd.spacing, true, dmgArr, stages, dop, sn.recon, b2);
+			}
+		}
+		long t1 = SuperHookStages.Now;
+		if (tailTask == null)
+		{
+			ComputeTail(rd, pos, vel, dmgArr, pf, inside, count, nBodies, sn.index, stages, tail);
+		}
+		else
+		{
+			tailTask.Wait();
+		}
+		stats = default(FrameStats);
+		for (int b3 = 0; b3 < nBodies; b3++)
+		{
+			SuperReconstruct.Body r = recs[b3];
+			stats.frameVerts += r.vertices.Length;
+			stats.frameRawVerts += r.rawVertexCount;
+			stats.lastFailedExcluded += r.failedExcluded;
+			stats.gridCells += r.gridCells;
+			long lat = r.bytesIdx + r.bytesHash + r.bytesDensityWork + r.bytesDensity;
+			stats.bytesLattice += lat;
+			long mesh = r.bytesMesh + ((long)r.vertices.Length * 3 + r.triangles.Length) * 4;
+			stats.bytesMesh += mesh;
+			long flds = r.bytesBlockFields + r.bytesVertexFields;
+			stats.bytesFields += flds;
+			stats.bytesDensity += r.bytesDensity;
+			stats.bytesDensityWork += r.bytesDensityWork;
+			stats.bytesHash += r.bytesHash;
+			if (flds + mesh + lat > stats.bytesBodyMax)
+			{
+				stats.bytesBodyMax = flds + mesh + lat;
+			}
+			Vector3 mn3 = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+			Vector3 mx3 = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+			Vector3[] verts = r.vertices;
+			for (int i3 = 0; i3 < verts.Length; i3++)
+			{
+				Vector3 v4 = verts[i3];
+				if (v4.x <= mn3.x)
+				{
+					mn3.x = v4.x;
+				}
+				if (v4.y <= mn3.y)
+				{
+					mn3.y = v4.y;
+				}
+				if (v4.z <= mn3.z)
+				{
+					mn3.z = v4.z;
+				}
+				if (v4.x >= mx3.x)
+				{
+					mx3.x = v4.x;
+				}
+				if (v4.y >= mx3.y)
+				{
+					mx3.y = v4.y;
+				}
+				if (v4.z >= mx3.z)
+				{
+					mx3.z = v4.z;
+				}
+			}
+			if (verts.Length == 0)
+			{
+				mn3 = Vector3.zero;
+				mx3 = Vector3.zero;
+			}
+			SuperTape.BodyFrame bf = new SuperTape.BodyFrame();
+			bf.aabbLo = mn3;
+			bf.aabbHi = mx3;
+			bf.vertices = r.vertices;
+			bf.triangles = r.triangles;
+			bf.fields = r.fields;
+			bf.blockLo = r.blockLo;
+			bf.blockCell = r.blockCell;
+			bf.bnx = r.bnx;
+			bf.bny = r.bny;
+			bf.bnz = r.bnz;
+			bf.blockFields = r.blockFields;
+			frame.bodies[b3] = bf;
+			SuperTape.BodyTelemetry tel = default(SuperTape.BodyTelemetry);
+			tel.kineticJ = tail.kineticJ[b3];
+			tel.momentum = tail.momentum[b3];
+			tel.massInDomainKg = tail.massInDomainKg[b3];
+			tel.particleVolumeM3 = r.particleVolumeM3;
+			frame.telemetry[b3] = tel;
+		}
+		frame.escapedMassKg = tail.escapedMassKg;
+		stages.Lap(SuperHookStages.Stage.Telemetry, t1);
+		frame.debrisCount = tail.debrisCount;
+		frame.debrisPos = tail.debrisPos;
+		frame.debrisFields = tail.debrisFields;
+		frame.verdictSoFar = tail.verdictSoFar;
+		stats.bytesDebris = (long)frame.debrisCount * 64;
+		return frame;
 	}
 
 	private static void ComputeTail(RunData rd, Vector3[] pos, Vector3[] vel, float[] dmgArr, float[][] pf, bool[] inside, int count, int nBodies, int frameIndex, SuperHookStages stages, FrameTail t)
 	{
+		long t0 = SuperHookStages.Now;
+		KahanSum escapedMass = default(KahanSum);
+		for (int b = 0; b < nBodies; b++)
+		{
+			SuperBaker.Body body = rd.bodies[b];
+			KahanSum ke = default(KahanSum);
+			KahanSum massDom = default(KahanSum);
+			KahanSum mx = default(KahanSum);
+			KahanSum my = default(KahanSum);
+			KahanSum mz = default(KahanSum);
+			for (int i = body.start; i < body.start + body.count; i++)
+			{
+				if (inside[i])
+				{
+					float m = rd.mass[i];
+					Vector3 v = vel[i];
+					massDom.Add(m);
+					ke.Add(0.5 * (double)m * ((double)v.x * v.x + (double)v.y * v.y + (double)v.z * v.z));
+					mx.Add((double)v.x * m);
+					my.Add((double)v.y * m);
+					mz.Add((double)v.z * m);
+				}
+				else
+				{
+					escapedMass.Add(rd.mass[i]);
+				}
+			}
+			t.kineticJ[b] = ke.Value;
+			t.momentum[b] = new Vector3((float)mx.Value, (float)my.Value, (float)mz.Value);
+			t.massInDomainKg[b] = massDom.Value;
+		}
+		t.escapedMassKg = escapedMass.Value;
+		long lapT = stages.Lap(SuperHookStages.Stage.Telemetry, t0);
+		int escapedCount = 0;
+		for (int j = 0; j < count; j++)
+		{
+			if (dmgArr[j] >= 1f && inside[j])
+			{
+				escapedCount++;
+			}
+		}
+		int stride = 1;
+		if (escapedCount > DebrisCap)
+		{
+			stride = (escapedCount + DebrisCap - 1) / DebrisCap;
+		}
+		int saved = 0;
+		List<Vector3> debrisPosList = new List<Vector3>(Math.Min(escapedCount, DebrisCap));
+		List<int> debrisIdx = new List<int>(Math.Min(escapedCount, DebrisCap));
+		int k = 0;
+		for (int l = 0; l < count; l++)
+		{
+			if (dmgArr[l] >= 1f && inside[l])
+			{
+				if (k % stride == 0)
+				{
+					debrisPosList.Add(pos[l]);
+					debrisIdx.Add(l);
+					saved++;
+				}
+				k++;
+			}
+		}
+		t.debrisCount = saved;
+		t.debrisPos = debrisPosList.ToArray();
+		t.debrisFields = new float[5][];
+		for (int f = 0; f < 5; f++)
+		{
+			t.debrisFields[f] = new float[saved];
+		}
+		for (int f2 = 0; f2 < 5; f2++)
+		{
+			for (int d = 0; d < saved; d++)
+			{
+				t.debrisFields[f2][d] = pf[f2][debrisIdx[d]];
+			}
+		}
+		if (stride > 1 && frameIndex % 25 == 0)
+		{
+			Debug.Log(string.Concat(new string[9] { "[лента] кадр ", frameIndex.ToString(), ": обломков ", escapedCount.ToString(), ", сохранено ", saved.ToString(), " (шаг подвыборки ", stride.ToString(), ")" }));
+		}
+		lapT = stages.Lap(SuperHookStages.Stage.Debris, lapT);
+		float ceiling = ((SabotageAbortCeilingMps > 0f) ? SabotageAbortCeilingMps : VelocityCeilingMps);
+		if (ceiling > 0f)
+		{
+			float vmaxSq = 0f;
+			int imax = -1;
+			for (int i2 = 0; i2 < count; i2++)
+			{
+				Vector3 v2 = vel[i2];
+				float sq = v2.x * v2.x + v2.y * v2.y + v2.z * v2.z;
+				if (sq > vmaxSq)
+				{
+					vmaxSq = sq;
+					imax = i2;
+				}
+			}
+			if (vmaxSq > ceiling * ceiling)
+			{
+				int maxBody = -1;
+				for (int b2 = 0; b2 < nBodies; b2++)
+				{
+					if (imax >= rd.bodies[b2].start && imax < rd.bodies[b2].start + rd.bodies[b2].count)
+					{
+						maxBody = b2;
+						break;
+					}
+				}
+				lock (DegenerateLock)
+				{
+					if (DegenerateFrame < 0 || frameIndex < DegenerateFrame)
+					{
+						DegenerateFrame = frameIndex;
+						DegenerateWhat = string.Format("кадр {0}: частица {1} (тело {2} «{3}»), ", frameIndex, imax, maxBody, (maxBody >= 0) ? ((object)rd.bodies[maxBody].material) : "?") + string.Format("|v| = {0:F0} м/с при потолке {1:F0} м/с, положение {2}", Mathf.Sqrt(vmaxSq), ceiling, pos[imax]);
+						DegenerateParticle = imax;
+						DegenerateBody = maxBody;
+						DegenerateBodyName = ((maxBody >= 0) ? rd.bodies[maxBody].material.ToString() : "?");
+						DegenerateSpeedMps = Mathf.Sqrt(vmaxSq);
+						DegenerateCeilingMps = ceiling;
+						DegenerateWhere = pos[imax];
+					}
+				}
+			}
+		}
+		t.verdictSoFar = (int)SuperOutcome.Classify(pos, vel, rd.mass, rd.v0, rd.bodies[0], rd.bodies[nBodies - 1], rd.rodDiameterM, rd.rodKe0, rd.plate0).verdict;
+		stages.Lap(SuperHookStages.Stage.Classify, lapT);
 	}
 
 	private static void InsideAndRange(int from, int to, Vector3[] pos, Vector3 gridLo, Vector3 gridHi, bool[] inside, float[][] pf, float[] outMin, float[] outMax, int outBase)
 	{
+		for (int i = from; i < to; i++)
+		{
+			Vector3 v = pos[i];
+			bool flag = v.x >= gridLo.x && v.y >= gridLo.y && v.z >= gridLo.z && gridHi.x >= v.x && gridHi.y >= v.y && gridHi.z >= v.z;
+			inside[i] = flag;
+		}
+		for (int ch = 0; ch < 5; ch++)
+		{
+			float mn = float.MaxValue;
+			float mx = float.MinValue;
+			for (int i2 = from; i2 < to; i2++)
+			{
+				if (inside[i2])
+				{
+					float v2 = pf[ch][i2];
+					if (v2 < mn)
+					{
+						mn = v2;
+					}
+					if (v2 > mx)
+					{
+						mx = v2;
+					}
+				}
+			}
+			outMin[outBase + ch] = mn;
+			outMax[outBase + ch] = mx;
+		}
 	}
 }
