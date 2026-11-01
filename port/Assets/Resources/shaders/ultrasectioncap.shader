@@ -7,56 +7,60 @@ Shader "ArmorSim/UltraSectionCap" {
 		_FieldZSpan ("Длина сетки по z, м", Float) = 1
 		_FieldOn ("Считать UV из положения", Range(0, 1)) = 0
 	}
-	//DummyShaderTextExporter
-	SubShader{
+	SubShader {
 		Tags { "RenderType"="Opaque" }
 		LOD 200
 
-		Pass
-		{
-			HLSLPROGRAM
+		Pass {
+			Cull Off
+			ZWrite On
+			ZTest LEqual
+
+			CGPROGRAM
 			#pragma vertex vert
 			#pragma fragment frag
+			#pragma target 3.0
+			#include "UnityCG.cginc"
 
-			float4x4 unity_ObjectToWorld;
-			float4x4 unity_MatrixVP;
+			sampler2D _MainTex;
 			float4 _MainTex_ST;
-
-			struct Vertex_Stage_Input
-			{
-				float4 pos : POSITION;
-				float2 uv : TEXCOORD0;
-			};
-
-			struct Vertex_Stage_Output
-			{
-				float2 uv : TEXCOORD0;
-				float4 pos : SV_POSITION;
-			};
-
-			Vertex_Stage_Output vert(Vertex_Stage_Input input)
-			{
-				Vertex_Stage_Output output;
-				output.uv = (input.uv.xy * _MainTex_ST.xy) + _MainTex_ST.zw;
-				output.pos = mul(unity_MatrixVP, mul(unity_ObjectToWorld, input.pos));
-				return output;
-			}
-
-			Texture2D<float4> _MainTex;
-			SamplerState sampler_MainTex;
 			float4 _Color;
+			float _FieldRMax;
+			float _FieldZMin;
+			float _FieldZSpan;
+			float _FieldOn;
 
-			struct Fragment_Stage_Input
-			{
+			struct appdata {
+				float4 vertex : POSITION;
 				float2 uv : TEXCOORD0;
 			};
 
-			float4 frag(Fragment_Stage_Input input) : SV_TARGET
-			{
-				return _MainTex.Sample(sampler_MainTex, input.uv.xy) * _Color;
+			struct v2f {
+				float4 pos : SV_POSITION;
+				float2 uv : TEXCOORD0;
+				float3 objPos : TEXCOORD1;
+			};
+
+			v2f vert (appdata v) {
+				v2f o;
+				o.pos = UnityObjectToClipPos(v.vertex);
+				o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+				o.objPos = v.vertex.xyz;
+				return o;
 			}
 
-			ENDHLSL
+			float4 frag (v2f i) : SV_Target {
+				float2 uv = i.uv;
+				if (_FieldOn > 0.5) {
+					float r = length(i.objPos.xy);
+					float u = saturate(r / max(_FieldRMax, 1e-6));
+					float v = saturate((i.objPos.z - _FieldZMin) / max(_FieldZSpan, 1e-6));
+					uv = float2(u, v);
+				}
+				return tex2D(_MainTex, uv) * _Color;
+			}
+			ENDCG
 		}
 	}
+	Fallback "Unlit/Texture"
 }

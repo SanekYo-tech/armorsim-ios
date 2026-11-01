@@ -5,45 +5,51 @@ Shader "ArmorSim/CrewShellClip" {
 		_Glossiness ("Smoothness", Range(0, 1)) = 0.25
 		_CrewHoleCount ("Impact channels", Float) = 0
 	}
-	//DummyShaderTextExporter
-	SubShader{
+	SubShader {
 		Tags { "RenderType"="Opaque" }
 		LOD 200
 
-		Pass
-		{
-			HLSLPROGRAM
-			#pragma vertex vert
-			#pragma fragment frag
+		CGPROGRAM
+		#pragma surface surf Standard fullforwardshadows addshadow
+		#pragma target 3.0
 
-			float4x4 unity_ObjectToWorld;
-			float4x4 unity_MatrixVP;
+		float4 _Color;
+		float _Metallic;
+		float _Glossiness;
+		float _CrewHoleCount;
 
-			struct Vertex_Stage_Input
-			{
-				float4 pos : POSITION;
-			};
+		// Заполняется из CrewImpactHoles.cs через MaterialPropertyBlock.
+		float4 _CrewHoleStart[32];
+		float4 _CrewHoleEnd[32];
+		float4x4 _CrewWorldToMeters;
 
-			struct Vertex_Stage_Output
-			{
-				float4 pos : SV_POSITION;
-			};
+		struct Input {
+			float3 worldPos;
+		};
 
-			Vertex_Stage_Output vert(Vertex_Stage_Input input)
-			{
-				Vertex_Stage_Output output;
-				output.pos = mul(unity_MatrixVP, mul(unity_ObjectToWorld, input.pos));
-				return output;
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			float3 pm = mul(_CrewWorldToMeters, float4(IN.worldPos, 1.0)).xyz;
+			int count = (int)clamp(_CrewHoleCount, 0.0, 32.0);
+
+			for (int i = 0; i < 32; i++) {
+				if (i >= count) {
+					break;
+				}
+				float4 a = _CrewHoleStart[i];
+				float4 b = _CrewHoleEnd[i];
+				float3 ab = b.xyz - a.xyz;
+				float len2 = max(dot(ab, ab), 1e-12);
+				float t = saturate(dot(pm - a.xyz, ab) / len2);
+				float3 closest = a.xyz + ab * t;
+				clip(length(pm - closest) - a.w);
 			}
 
-			float4 _Color;
-
-			float4 frag(Vertex_Stage_Output input) : SV_TARGET
-			{
-				return _Color; // RGBA
-			}
-
-			ENDHLSL
+			o.Albedo = _Color.rgb;
+			o.Metallic = _Metallic;
+			o.Smoothness = _Glossiness;
+			o.Alpha = 1.0;
 		}
+		ENDCG
 	}
+	Fallback "Diffuse"
 }

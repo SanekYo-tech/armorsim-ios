@@ -9,56 +9,64 @@ Shader "Hidden/ArmorSim/SectionClip" {
 		_TexInfluence ("Сила текстуры", Range(0, 1)) = 1
 		_TexMean ("Средняя яркость текстуры", Vector) = (1,1,1,1)
 	}
-	//DummyShaderTextExporter
-	SubShader{
+	SubShader {
 		Tags { "RenderType"="Opaque" }
 		LOD 200
 
-		Pass
-		{
-			HLSLPROGRAM
-			#pragma vertex vert
-			#pragma fragment frag
+		CGPROGRAM
+		#pragma surface surf Standard fullforwardshadows addshadow
+		#pragma target 3.0
 
-			float4x4 unity_ObjectToWorld;
-			float4x4 unity_MatrixVP;
-			float4 _MainTex_ST;
+		sampler2D _MainTex;
+		float4 _MainTex_ST;
+		float4 _Color;
+		float _TexScale;
+		float _TexSharpness;
+		float _TexInfluence;
+		float4 _TexMean;
+		float _Metallic;
+		float _Glossiness;
 
-			struct Vertex_Stage_Input
-			{
-				float4 pos : POSITION;
-				float2 uv : TEXCOORD0;
-			};
+		// Глобалы SectionView.cs
+		float4 _SectionPlane;
+		float _SectionEnabled;
 
-			struct Vertex_Stage_Output
-			{
-				float2 uv : TEXCOORD0;
-				float4 pos : SV_POSITION;
-			};
+		struct Input {
+			float3 worldPos;
+			float3 worldNormal;
+		};
 
-			Vertex_Stage_Output vert(Vertex_Stage_Input input)
-			{
-				Vertex_Stage_Output output;
-				output.uv = (input.uv.xy * _MainTex_ST.xy) + _MainTex_ST.zw;
-				output.pos = mul(unity_MatrixVP, mul(unity_ObjectToWorld, input.pos));
-				return output;
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			// Оставляем дальнюю от камеры половину: signed distance >= 0.
+			if (_SectionEnabled > 0.5) {
+				clip(dot(IN.worldPos, _SectionPlane.xyz) - _SectionPlane.w);
 			}
 
-			Texture2D<float4> _MainTex;
-			SamplerState sampler_MainTex;
-			float4 _Color;
+			float3 n = normalize(IN.worldNormal);
+			float3 w = pow(abs(n), max(_TexSharpness, 1.0));
+			float wSum = max(w.x + w.y + w.z, 1e-5);
+			w /= wSum;
 
-			struct Fragment_Stage_Input
-			{
-				float2 uv : TEXCOORD0;
-			};
+			float scale = max(_TexScale, 1e-4);
+			float3 p = IN.worldPos / scale;
 
-			float4 frag(Fragment_Stage_Input input) : SV_TARGET
-			{
-				return _MainTex.Sample(sampler_MainTex, input.uv.xy) * _Color;
-			}
+			float2 uvX = p.zy * _MainTex_ST.xy + _MainTex_ST.zw;
+			float2 uvY = p.xz * _MainTex_ST.xy + _MainTex_ST.zw;
+			float2 uvZ = p.xy * _MainTex_ST.xy + _MainTex_ST.zw;
 
-			ENDHLSL
+			float3 tex = tex2D(_MainTex, uvX).rgb * w.x
+			           + tex2D(_MainTex, uvY).rgb * w.y
+			           + tex2D(_MainTex, uvZ).rgb * w.z;
+
+			float3 mean = max(_TexMean.rgb, 0.001);
+			float3 normalised = tex / mean;
+			float3 albedo = _Color.rgb * lerp(float3(1.0, 1.0, 1.0), normalised, _TexInfluence);
+
+			o.Albedo = max(albedo, 0.0);
+			o.Metallic = _Metallic;
+			o.Smoothness = _Glossiness;
+			o.Alpha = 1.0;
 		}
+		ENDCG
 	}
 }

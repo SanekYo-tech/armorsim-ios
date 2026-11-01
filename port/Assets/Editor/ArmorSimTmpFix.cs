@@ -1,7 +1,5 @@
 using System;
-using System.IO;
 using System.Text;
-using System.Text.RegularExpressions;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
@@ -29,14 +27,8 @@ public static class ArmorSimTmpFix
     private const string DistanceFieldShaderName = "TextMeshPro/Mobile/Distance Field";
     private const string SpriteShaderName = "TextMeshPro/Sprite";
 
-    private const string DummyDistanceFieldName = "ArmorSim/Dummy/TextMeshPro/Mobile/Distance Field";
-    private const string DummySpriteName = "ArmorSim/Dummy/TextMeshPro/Sprite";
-
     public static void Apply()
     {
-        RenameDummyShader("Assets/Shader/TextMeshPro_Mobile_Distance Field.shader", DummyDistanceFieldName);
-        RenameDummyShader("Assets/Shader/TextMeshPro_Sprite.shader", DummySpriteName);
-
         Shader distanceField = Shader.Find(DistanceFieldShaderName);
         Shader spriteShader = Shader.Find(SpriteShaderName);
 
@@ -78,30 +70,6 @@ public static class ArmorSimTmpFix
         }
         string path = AssetDatabase.GetAssetPath(shader);
         return shader.name + " (" + (string.IsNullOrEmpty(path) ? "built-in" : path) + ")";
-    }
-
-    private static void RenameDummyShader(string path, string newName)
-    {
-        if (!File.Exists(path))
-        {
-            return;
-        }
-
-        string text = File.ReadAllText(path);
-        if (text.IndexOf(newName, StringComparison.Ordinal) >= 0)
-        {
-            return;
-        }
-
-        string renamed = Regex.Replace(text, "^Shader\\s+\"[^\"]+\"", "Shader \"" + newName + "\"", RegexOptions.Multiline);
-        if (renamed == text)
-        {
-            return;
-        }
-
-        File.WriteAllText(path, renamed);
-        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
-        Debug.Log("[ArmorSimTmpFix] Renamed dummy shader " + path + " -> " + newName);
     }
 
     private static int ReassignMaterials(string folder, Shader shader)
