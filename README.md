@@ -10,6 +10,14 @@
 
 ---
 
+## Download
+
+The first build is published in [Releases](https://github.com/SanekYo-tech/armorsim-ios/releases): **`ArmorSim-unsigned.ipa`** (iOS 15+, arm64).
+
+It is unsigned — install it with **Sideloadly** or **AltStore** using a free Apple ID, or sign it with your own Apple Developer certificate.
+
+---
+
 ## What is this?
 
 A full reverse-engineering of [ArmorSim](https://store.steampowered.com/app/5159810/ArmorSim/) — a terminal-ballistics sandbox by Timerlan Galimov — from its compiled Windows IL2CPP binary (`GameAssembly.dll`, Unity 6000.3.11f1) back into source code, then adapted for iOS.
