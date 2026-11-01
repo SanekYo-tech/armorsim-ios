@@ -73,6 +73,10 @@ public static class ArmorSimBuild
         }
 
         Debug.Log($"[ArmorSimBuild] Xcode project exported to {output}");
+        Debug.Log("# Build results #");
+        Debug.Log($"Result: {report.summary.result}");
+        Debug.Log($"Size: {report.summary.totalSize}");
+        Debug.Log("Build succeeded!");
     }
 
     private static string GetArgument(string name)
