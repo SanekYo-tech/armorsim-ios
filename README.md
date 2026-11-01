@@ -66,19 +66,29 @@ The project builds via **GitHub Actions** (`.github/workflows/ios.yml`):
 
 ### Required secrets
 
+**Unity (required to run the editor at all):**
+
 | Secret | Description |
 |--------|-------------|
 | `UNITY_EMAIL` | Unity account email |
 | `UNITY_PASSWORD` | Unity account password |
-| `UNITY_SERIAL` | Unity Pro/Plus serial number |
+| `UNITY_LICENSE` | Unity Personal/Plus/Pro `.ulf` license file contents |
+| `UNITY_SERIAL` | Unity Pro/Plus serial (alternative to `UNITY_LICENSE`) |
+
+For a free **Unity Personal** account, run the `Unity activation file` workflow once, download the `.alf` artifact, convert it at <https://license.unity3d.com/manual> and save the resulting `.ulf` text as `UNITY_LICENSE`.
+
+**Apple signing (optional):**
+
+| Secret | Description |
+|--------|-------------|
 | `IOS_CERTIFICATE_BASE64` | Base64-encoded .p12 signing certificate |
 | `IOS_CERTIFICATE_PASSWORD` | Password for the .p12 file |
 | `IOS_PROVISION_PROFILE_BASE64` | Base64-encoded .mobileprovision |
 | `IOS_TEAM_ID` | Apple Developer Team ID |
-| `IOS_BUNDLE_ID` | Bundle identifier (e.g. `com.galimovdynamics.armorsim`) |
+| `IOS_BUNDLE_ID` | Bundle identifier (default `com.galimovdynamics.armorsim`) |
 | `IOS_EXPORT_METHOD` | `development`, `ad-hoc`, or `app-store-connect` |
 
-Without these secrets, the workflow will fail at the Unity license step.
+If the Apple secrets are absent, the workflow still produces an **unsigned `.ipa`**, which can be signed locally with Sideloadly or AltStore using a free Apple ID.
 
 ## Tools used for reverse engineering
 
