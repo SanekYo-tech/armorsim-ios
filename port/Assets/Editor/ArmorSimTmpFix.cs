@@ -20,8 +20,8 @@ using UnityEngine.TextCore.LowLevel;
 /// </summary>
 public static class ArmorSimTmpFix
 {
-    private const string MainFontPath = "Assets/Resources/fonts & materials/LiberationSans SDF.asset";
-    private const string CyrillicFontPath = "Assets/Resources/fonts & materials/LiberationSans Cyrillic SDF.asset";
+    private const string MainFontPath = "Assets/Resources/Fonts & Materials/LiberationSans SDF.asset";
+    private const string CyrillicFontPath = "Assets/Resources/Fonts & Materials/LiberationSans Cyrillic SDF.asset";
     private const string SourceFontPath = "Assets/Font/LiberationSans.ttf";
 
     private const string DistanceFieldShaderName = "TextMeshPro/Mobile/Distance Field";

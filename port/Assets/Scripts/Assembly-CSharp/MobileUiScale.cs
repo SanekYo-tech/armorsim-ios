@@ -4,20 +4,21 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 /// <summary>
-/// Makes the runtime-built uGUI screens comfortable on a phone.
+/// Keeps the runtime-built uGUI screens fully visible on a phone.
 ///
-/// Most screens are created in code with a 1920x1080 reference resolution,
-/// which is tuned for a desktop monitor and looks tiny on a phone. This
-/// helper lowers the reference resolution to 1024x576 and switches scalers to
-/// Expand mode, so the whole layout gets ~1.5-1.9x bigger while still fitting
-/// any screen aspect ratio (no vertical or horizontal clipping).
+/// The game was authored for a 1920x1080 canvas and uses absolute offsets
+/// (e.g. menu rows at -976 units from the top), so the canvas must keep at
+/// least the full 1080-unit design height. ScaleWithScreenSize's default
+/// width matching gives a shorter canvas on tall phone screens and clips the
+/// lower part of the UI; "Expand" matches the smaller axis instead, which
+/// keeps the whole 1920x1080 design area visible on any aspect ratio.
+///
+/// This helper deliberately does not change reference resolutions or the
+/// scale factor: shrinking the reference canvas is what made the layout
+/// overflow.
 /// </summary>
 public sealed class MobileUiScale : MonoBehaviour
 {
-	private const float ReferenceWidth = 1024f;
-
-	private const float ReferenceHeight = 576f;
-
 	private static MobileUiScale instance;
 
 	[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -63,56 +64,18 @@ public sealed class MobileUiScale : MonoBehaviour
 
 	public static void Apply()
 	{
-		Canvas[] canvases = Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-		for (int i = 0; i < canvases.Length; i++)
+		CanvasScaler[] scalers = Object.FindObjectsByType<CanvasScaler>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+		for (int i = 0; i < scalers.Length; i++)
 		{
-			Canvas canvas = canvases[i];
-			if (canvas == null || !canvas.isRootCanvas || canvas.renderMode == RenderMode.WorldSpace)
+			CanvasScaler scaler = scalers[i];
+			if (scaler == null || scaler.uiScaleMode != CanvasScaler.ScaleMode.ScaleWithScreenSize)
 			{
 				continue;
 			}
 
-			CanvasScaler scaler = canvas.GetComponent<CanvasScaler>();
-			if (scaler == null)
-			{
-				scaler = canvas.gameObject.AddComponent<CanvasScaler>();
-			}
-			ApplyScaler(scaler);
-		}
-
-		CanvasScaler[] allScalers = Object.FindObjectsByType<CanvasScaler>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-		for (int i = 0; i < allScalers.Length; i++)
-		{
-			ApplyScaler(allScalers[i]);
-		}
-	}
-
-	private static void ApplyScaler(CanvasScaler scaler)
-	{
-		if (scaler == null)
-		{
-			return;
-		}
-
-		if (scaler.uiScaleMode == CanvasScaler.ScaleMode.ScaleWithScreenSize)
-		{
-			Vector2 reference = scaler.referenceResolution;
-			bool needsResize = reference.x <= 0f || reference.y <= 0f || reference.x > ReferenceWidth || reference.y > ReferenceHeight;
-			if (needsResize)
-			{
-				scaler.referenceResolution = new Vector2(ReferenceWidth, ReferenceHeight);
-			}
-
-			// Expand fits the whole reference area into the screen, so nothing
-			// gets cut off on tall phone screens or on 4:3 tablets.
+			// Expand uses the smaller screen axis, so the full reference area
+			// (1920x1080 and whatever each screen defines) always fits.
 			scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.Expand;
-			return;
-		}
-
-		if (scaler.uiScaleMode == CanvasScaler.ScaleMode.ConstantPixelSize)
-		{
-			float target = Mathf.Min(Screen.width / ReferenceWidth, Screen.height / ReferenceHeight);
-			scaler.scaleFactor = Mathf.Max(scaler.scaleFactor, Mathf.Clamp(target, 1f, 4f));
 		}
 	}
 }
