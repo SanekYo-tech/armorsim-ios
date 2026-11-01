@@ -2,12 +2,12 @@ name: Unity activation file
 
 # Run this once to obtain the manual activation file (.alf).
 # 1. Actions -> "Unity activation file" -> Run workflow
-# 2. Download the Unity_v6000.3.11f1.alf artifact
-# 3. Open https://license.unity3d.com/manual, upload the .alf, choose the license
-#    type (Personal), download the .ulf file
+# 2. Download the Unity-Activation-File artifact (*.alf)
+# 3. Open https://license.unity3d.com/manual, upload the .alf, choose
+#    "Unity Personal", download the .ulf file
 # 4. Add repository secret UNITY_LICENSE = the full text of the .ulf file
 #
-# For Unity Pro/Plus you can skip this and add UNITY_SERIAL instead.
+# Unity Pro/Plus users can skip this and add UNITY_SERIAL instead.
 
 on:
   workflow_dispatch:
@@ -15,13 +15,24 @@ on:
 jobs:
   request-activation-file:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: game-ci/unity-request-activation-file@v2
-        id: getManualLicenseFile
-        with:
-          unityVersion: 6000.3.11f1
+      - uses: actions/checkout@v4
+
+      - name: Create manual activation file
+        run: |
+          set -uo pipefail
+          docker run --rm \
+            -v "$PWD":/project \
+            -w /project \
+            unityci/editor:ubuntu-6000.3.11f1-base-3 \
+            /opt/unity/Editor/Unity -batchmode -nographics -logFile - -createManualActivationFile || true
+          echo "--- generated files ---"
+          ls -la
+          find . -maxdepth 2 -name '*.alf' -print
 
       - uses: actions/upload-artifact@v4
         with:
           name: Unity-Activation-File
-          path: ${{ steps.getManualLicenseFile.outputs.filePath }}
+          path: "**/*.alf"
+          if-no-files-found: error
