@@ -72,10 +72,9 @@ The project builds via **GitHub Actions** (`.github/workflows/ios.yml`):
 |--------|-------------|
 | `UNITY_EMAIL` | Unity account email |
 | `UNITY_PASSWORD` | Unity account password |
-| `UNITY_LICENSE` | Unity Personal/Plus/Pro `.ulf` license file contents |
-| `UNITY_SERIAL` | Unity Pro/Plus serial (alternative to `UNITY_LICENSE`) |
+| `UNITY_SERIAL` | Unity Pro/Plus serial (optional; Personal works without it) |
 
-For a free **Unity Personal** account, run the `Unity activation file` workflow once, download the `.alf` artifact, convert it at <https://license.unity3d.com/manual> and save the resulting `.ulf` text as `UNITY_LICENSE`.
+The workflow uses `game-ci/unity-builder@v6`, which activates **Unity Personal** with the email/password pair through Unity's licensing client. No `.ulf` file is needed for a free account.
 
 **Apple signing (optional):**
 
