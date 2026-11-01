@@ -36,7 +36,7 @@ public static class ArmorSimTmpFix
         Debug.Log("[ArmorSimTmpFix] sprite shader: " + Describe(spriteShader));
 
         int replaced = ReassignMaterials("Assets/Resources/fonts & materials", distanceField);
-        replaced += ReassignMaterial("Assets/Material/TextMeshPro_Sprite.mat", spriteShader);
+        replaced += ReassignMaterial("Assets/Material/TextMeshPro_Sprite.mat", spriteShader) ? 1 : 0;
         Debug.Log("[ArmorSimTmpFix] Re-pointed TMP materials to real shaders: " + replaced);
 
         TMP_FontAsset cyrillic = EnsureCyrillicFont(distanceField);
