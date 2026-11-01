@@ -6,6 +6,14 @@ reversed/
 # Локальная проверка C# (reference DLL не нужны в CI)
 build/
 
+# Реверс-инструменты (специфичны для локальной машины)
+tools_decomp/
+tools/
+docs/
+
+# Статус реверса (рабочие заметки, не нужны в релизе)
+STATUS.md
+
 # Unity
 port/Library/
 port/Temp/
@@ -20,5 +28,9 @@ port/.idea/
 build/
 *.ipa
 *.xcarchive
+
+# Кэш
+__pycache__/
+*.pyc
 
 .DS_Store
