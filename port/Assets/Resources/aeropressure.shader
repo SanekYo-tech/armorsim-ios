@@ -31,7 +31,6 @@ Shader "ArmorSim/AeroPressure" {
 				float3 worldNormal : TEXCOORD0;
 				float3 viewDir : TEXCOORD1;
 				float4 color : COLOR;
-				float facing : VFACE;
 			};
 
 			v2f vert (appdata v) {
@@ -43,8 +42,8 @@ Shader "ArmorSim/AeroPressure" {
 				return o;
 			}
 
-			float4 frag (v2f i) : SV_Target {
-				float3 n = normalize(i.worldNormal) * (i.facing < 0.0 ? -1.0 : 1.0);
+			float4 frag (v2f i, float facing : VFACE) : SV_Target {
+				float3 n = normalize(i.worldNormal) * (facing < 0.0 ? -1.0 : 1.0);
 				float3 l = normalize(_WorldSpaceLightPos0.xyz);
 				float ndl = saturate(dot(n, l));
 				float3 ambient = max(ShadeSH9(float4(n, 1.0)), 0.22);

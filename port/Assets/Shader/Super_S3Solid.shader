@@ -42,7 +42,6 @@ Shader "Super/S3Solid" {
 				float3 worldNormal : TEXCOORD1;
 				float3 viewDir : TEXCOORD2;
 				float4 color : COLOR;
-				float facing : VFACE;
 			};
 
 			v2f vert (appdata v) {
@@ -55,13 +54,13 @@ Shader "Super/S3Solid" {
 				return o;
 			}
 
-			float4 frag (v2f i) : SV_Target {
+			float4 frag (v2f i, float facing : VFACE) : SV_Target {
 				float3 cutN = normalize(_CutNormal.xyz);
 				float cutD = (_CutOn > 0.5) ? dot(i.worldPos - _CutPoint.xyz, cutN) : -1.0;
 				clip(-cutD);
 
 				float3 N = normalize(i.worldNormal);
-				if (i.facing < 0.0) {
+				if (facing < 0.0) {
 					N = -N;
 				}
 
@@ -75,7 +74,7 @@ Shader "Super/S3Solid" {
 				float3 ambient = max(ShadeSH9(float4(N, 1.0)), 0.18);
 				float3 col = base * (ambient * 0.55 + (0.28 + 0.72 * ndl));
 				col += spec;
-				if (i.facing < 0.0) {
+				if (facing < 0.0) {
 					col *= 0.62;
 				}
 				return float4(col, 1.0);

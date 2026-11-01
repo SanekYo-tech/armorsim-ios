@@ -24,19 +24,19 @@ Shader "Flat2D/SurfaceScreen" {
 		float4 _ShadowCol;
 		float4 _EdgeCol;
 
-		struct v2f_img {
+		struct Flat2Dv2f {
 			float4 pos : SV_POSITION;
 			float2 uv : TEXCOORD0;
 		};
 
-		v2f_img vert_img (appdata_img v) {
-			v2f_img o;
+		Flat2Dv2f Flat2DVert (appdata_img v) {
+			Flat2Dv2f o;
 			o.pos = UnityObjectToClipPos(v.vertex);
 			o.uv = v.texcoord.xy;
 			return o;
 		}
 
-		float4 BlurH (v2f_img i) : SV_Target {
+		float4 BlurH (Flat2Dv2f i) : SV_Target {
 			float2 d = float2(_BlurPx * _MainTex_TexelSize.x, 0.0);
 			float4 c = tex2D(_MainTex, i.uv) * 0.2270;
 			c += (tex2D(_MainTex, i.uv + d * 1.3846) + tex2D(_MainTex, i.uv - d * 1.3846)) * 0.3162;
@@ -44,7 +44,7 @@ Shader "Flat2D/SurfaceScreen" {
 			return c;
 		}
 
-		float4 BlurV (v2f_img i) : SV_Target {
+		float4 BlurV (Flat2Dv2f i) : SV_Target {
 			float2 d = float2(0.0, _BlurPx * _MainTex_TexelSize.y);
 			float4 c = tex2D(_MainTex, i.uv) * 0.2270;
 			c += (tex2D(_MainTex, i.uv + d * 1.3846) + tex2D(_MainTex, i.uv - d * 1.3846)) * 0.3162;
@@ -52,7 +52,7 @@ Shader "Flat2D/SurfaceScreen" {
 			return c;
 		}
 
-		float4 SurfaceFrag (v2f_img i) : SV_Target {
+		float4 SurfaceFrag (Flat2Dv2f i) : SV_Target {
 			float2 uv = i.uv;
 			float4 s = tex2D(_MainTex, uv);
 
@@ -89,7 +89,7 @@ Shader "Flat2D/SurfaceScreen" {
 			Cull Off
 
 			CGPROGRAM
-			#pragma vertex vert_img
+			#pragma vertex Flat2DVert
 			#pragma fragment BlurH
 			#pragma target 3.0
 			ENDCG
@@ -103,7 +103,7 @@ Shader "Flat2D/SurfaceScreen" {
 			Cull Off
 
 			CGPROGRAM
-			#pragma vertex vert_img
+			#pragma vertex Flat2DVert
 			#pragma fragment BlurV
 			#pragma target 3.0
 			ENDCG
@@ -117,7 +117,7 @@ Shader "Flat2D/SurfaceScreen" {
 			Cull Off
 
 			CGPROGRAM
-			#pragma vertex vert_img
+			#pragma vertex Flat2DVert
 			#pragma fragment SurfaceFrag
 			#pragma target 3.0
 			ENDCG
