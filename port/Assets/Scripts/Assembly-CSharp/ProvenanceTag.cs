@@ -1,0 +1,10 @@
+public enum ProvenanceTag
+{
+	MEASURED = 0,
+	DERIVED = 1,
+	FITTED = 2,
+	ASSUMED = 3,
+	ASSUMED_BY_SUBSTITUTION = 4,
+	FITTED_BY_US = 5,
+	NOT_SUPPLIED_BY_BRIEF = 6
+}

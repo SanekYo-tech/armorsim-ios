@@ -1,0 +1,24 @@
+# Исходная Windows-сборка и тяжёлые реверс-артефакты в репозиторий не кладём
+extracted/
+reversed/
+*.rar
+
+# Локальная проверка C# (reference DLL не нужны в CI)
+build/
+
+# Unity
+port/Library/
+port/Temp/
+port/Obj/
+port/Logs/
+port/UserSettings/
+port/Build/
+port/.vs/
+port/.idea/
+
+# Экспорт и артефакты
+build/
+*.ipa
+*.xcarchive
+
+.DS_Store
