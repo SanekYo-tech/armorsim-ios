@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
+using ThreadPriority = System.Threading.ThreadPriority;
 
 public static class SuperTapeCompact
 {

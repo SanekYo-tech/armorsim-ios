@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using UnityEngine;
+using ThreadPriority = System.Threading.ThreadPriority;
 
 public sealed class SuperTapeVerifier : IDisposable
 {

@@ -6,6 +6,7 @@ using Debug = UnityEngine.Debug;
 using Random = System.Random;
 using System.IO;
 using System.IO.Compression;
+using CompressionLevel = System.IO.Compression.CompressionLevel;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;

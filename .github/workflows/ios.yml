@@ -11,6 +11,13 @@ jobs:
         with:
           lfs: true
 
+      - uses: actions/cache@v4
+        with:
+          path: port/Library
+          key: Library-iOS-${{ hashFiles('port/Assets/**', 'port/Packages/**', 'port/ProjectSettings/**') }}
+          restore-keys: |
+            Library-iOS-
+
       - name: Export Unity Xcode project
         id: unity
         uses: game-ci/unity-builder@v6
@@ -26,6 +33,7 @@ jobs:
           targetPlatform: iOS
           buildMethod: ArmorSimBuild.BuildiOS
           buildsPath: build
+          cacheUnityInstallationOnMac: true
           customParameters: "-armorsimOutputPath ${{ github.workspace }}/build/Xcode -armorsimBundleId ${{ secrets.IOS_BUNDLE_ID || 'com.galimovdynamics.armorsim' }}"
 
       - name: Install signing certificate and profile
