@@ -4,6 +4,6 @@ public readonly struct ProjectileState
 
 	public ProjectileState(string projectileId)
 	{
-		ProjectileId = null;
+		ProjectileId = projectileId;
 	}
 }

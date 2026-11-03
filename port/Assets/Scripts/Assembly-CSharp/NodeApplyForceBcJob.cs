@@ -15,5 +15,14 @@ public struct NodeApplyForceBcJob : IJobParallelFor
 
 	public void Execute(int n)
 	{
+		if (nodeFixed[n] != 0)
+		{
+			nodeFr[n] = 0f;
+			nodeFz[n] = 0f;
+		}
+		else if (nodeOnAxis[n] != 0)
+		{
+			nodeFr[n] = 0f;
+		}
 	}
 }

@@ -27,5 +27,11 @@ public struct ContactWorkJob : IJob
 
 	public void Execute()
 	{
+		double sum = 0.0;
+		for (int i = 0; i < nodeCFr.Length; i++)
+		{
+			sum += (double)(nodeVrPrev[i] + nodeVr[i]) * 0.5 * (double)nodeCFr[i] + (double)(nodeVzPrev[i] + nodeVz[i]) * 0.5 * (double)nodeCFz[i];
+		}
+		result[0] = -(dt * sum);
 	}
 }

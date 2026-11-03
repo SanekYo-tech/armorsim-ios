@@ -22,9 +22,9 @@ public struct SuperShellSpec
 
 	public string capMaterial;
 
-	public bool HasJacket => false;
+	public bool HasJacket => coreDiameterFrac >= 0.999f && !string.IsNullOrEmpty(jacketMaterial);
 
-	public bool HasCap => false;
+	public bool HasCap => capLengthFrac > 0.0001f && !string.IsNullOrEmpty(capMaterial);
 
-	public int BodyCount => 0;
+	public int BodyCount => 1 + (HasJacket ? 1 : 0) + (HasCap ? 1 : 0);
 }

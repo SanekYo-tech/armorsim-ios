@@ -24,5 +24,15 @@ public sealed class RadarCounters
 
 	public bool ResolutionBelowOne;
 
-	public double GrazingFraction => 0.0;
+	public double GrazingFraction
+	{
+		get
+		{
+			if (SurfaceHits == 0L)
+			{
+				return 0.0;
+			}
+			return (double)GrazingTerminations / (double)SurfaceHits;
+		}
+	}
 }

@@ -8,13 +8,13 @@ public struct WheelZone
 
 	public float yMax;
 
-	public bool Valid => false;
+	public bool Valid => xMax > xMin && yMax > yMin;
 
 	public WheelZone(float xMin, float yMin, float xMax, float yMax)
 	{
-		this.xMin = 0f;
-		this.yMin = 0f;
-		this.xMax = 0f;
-		this.yMax = 0f;
+		this.xMin = xMin;
+		this.yMin = yMin;
+		this.xMax = xMax;
+		this.yMax = yMax;
 	}
 }

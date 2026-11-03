@@ -10,8 +10,8 @@ public readonly struct BodyShotSetup
 
 	public BodyShotSetup(Vector3 originMm, Vector3 direction, string projectileId)
 	{
-		OriginMm = default;
-		Direction = default;
-		ProjectileId = null;
+		OriginMm = originMm;
+		Direction = direction;
+		ProjectileId = projectileId;
 	}
 }

@@ -8,12 +8,12 @@ public readonly struct RadarHit
 
 	public readonly double3 Point;
 
-	public bool Found => false;
+	public bool Found => Face >= 0;
 
 	public RadarHit(int face, double distance, double3 point)
 	{
-		Face = 0;
-		Distance = 0.0;
-		Point = default;
+		Face = face;
+		Distance = distance;
+		Point = point;
 	}
 }

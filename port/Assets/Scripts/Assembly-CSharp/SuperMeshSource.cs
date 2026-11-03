@@ -12,5 +12,5 @@ public sealed class SuperMeshSource
 
 	public int partCount;
 
-	public string StoreKey => null;
+	public string StoreKey => contentSha + "|" + settings.Key;
 }

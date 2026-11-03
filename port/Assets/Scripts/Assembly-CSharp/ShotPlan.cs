@@ -59,5 +59,5 @@ public class ShotPlan
 
 	public PrecursorCharge precursor;
 
-	public float MainChargeDelayS => 0f;
+	public float MainChargeDelayS => (precursor != null) ? precursor.delayS : 0f;
 }

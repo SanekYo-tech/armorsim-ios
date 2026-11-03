@@ -20,6 +20,8 @@ public sealed class AeroOrbit : MonoBehaviour
 
 	public void Frame()
 	{
+		targetGoal = Vector3.zero;
+		distanceGoal = 9f;
 	}
 
 	private void LateUpdate()

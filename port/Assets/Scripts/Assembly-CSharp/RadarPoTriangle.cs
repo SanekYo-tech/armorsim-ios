@@ -14,10 +14,10 @@ internal readonly struct RadarPoTriangle
 
 	public RadarPoTriangle(int face, double3 a, double3 b, double3 c, double3 effectiveNormal)
 	{
-		Face = 0;
-		A = default;
-		B = default;
-		C = default;
-		EffectiveNormal = default;
+		Face = face;
+		A = a;
+		B = b;
+		C = c;
+		EffectiveNormal = effectiveNormal;
 	}
 }

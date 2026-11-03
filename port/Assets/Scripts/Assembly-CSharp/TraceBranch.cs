@@ -12,5 +12,9 @@ public sealed class TraceBranch
 
 	public TraceBranch(int branchId, int parentBranchId, int spawnedAtInterfaceIndex, IReadOnlyList<TraceSegment> segments)
 	{
+		BranchId = branchId;
+		ParentBranchId = parentBranchId;
+		SpawnedAtInterfaceIndex = spawnedAtInterfaceIndex;
+		Segments = segments;
 	}
 }

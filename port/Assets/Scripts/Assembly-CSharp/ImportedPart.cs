@@ -8,5 +8,5 @@ public sealed class ImportedPart
 
 	public int[] triangles;
 
-	public int TriangleCount => 0;
+	public int TriangleCount => (triangles != null) ? (triangles.Length / 3) : 0;
 }

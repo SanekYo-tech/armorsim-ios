@@ -25,5 +25,10 @@ public struct GeometryFrame
 
 	public void Dispose()
 	{
+		projectileProfile.Dispose();
+		targetProfile.Dispose();
+		fragmentSeeds.Dispose();
+		fieldPlastic.Dispose();
+		fieldBody.Dispose();
 	}
 }

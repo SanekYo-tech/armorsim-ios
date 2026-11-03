@@ -6,5 +6,5 @@ public struct SceneLoadResult
 
 	public string message;
 
-	public bool Loaded => false;
+	public bool Loaded => status == SceneLoadStatus.Ok || status == SceneLoadStatus.Migrated;
 }

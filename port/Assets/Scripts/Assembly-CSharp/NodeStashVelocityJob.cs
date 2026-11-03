@@ -15,5 +15,7 @@ public struct NodeStashVelocityJob : IJobParallelFor
 
 	public void Execute(int n)
 	{
+		nodeVrPrev[n] = nodeVr[n];
+		nodeVzPrev[n] = nodeVz[n];
 	}
 }

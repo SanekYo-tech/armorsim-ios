@@ -14,10 +14,10 @@ public readonly struct TraceInterface
 
 	public TraceInterface(int segmentIndexAfter, IMaterialRef before, IMaterialRef after, float obliquityDeg, Vector3 pointMm)
 	{
-		SegmentIndexAfter = 0;
-		Before = null;
-		After = null;
-		ObliquityDeg = 0f;
-		PointMm = default;
+		SegmentIndexAfter = segmentIndexAfter;
+		Before = before;
+		After = after;
+		ObliquityDeg = obliquityDeg;
+		PointMm = pointMm;
 	}
 }

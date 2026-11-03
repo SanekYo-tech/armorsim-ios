@@ -13,6 +13,13 @@ public sealed class AeroMenuScroll : MonoBehaviour
 
 	private readonly List<AeroMenuCardFocus> focusHandlers;
 
+	public AeroMenuScroll()
+	{
+		buttons = new List<Button>();
+		actions = new List<UnityAction>();
+		focusHandlers = new List<AeroMenuCardFocus>();
+	}
+
 	public void Configure(ScrollRect target)
 	{
 	}
@@ -27,5 +34,6 @@ public sealed class AeroMenuScroll : MonoBehaviour
 
 	private void OnDestroy()
 	{
+		Unbind();
 	}
 }

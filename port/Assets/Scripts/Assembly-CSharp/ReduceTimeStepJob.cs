@@ -13,5 +13,14 @@ public struct ReduceTimeStepJob : IJob
 
 	public void Execute()
 	{
+		float min = 1E+30f;
+		for (int i = 0; i < elemDtCand.Length; i++)
+		{
+			if (elemAlive[i] != 0 && elemDtCand[i] < min)
+			{
+				min = elemDtCand[i];
+			}
+		}
+		result[0] = min;
 	}
 }

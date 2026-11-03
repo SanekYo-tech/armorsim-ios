@@ -18,5 +18,12 @@ public sealed class RadarPath
 
 	public RadarPath(double3[] points, int[] faces, int bounceCount, double amplitude = 0.0, bool escapesToFarField = false, bool truncated = false)
 	{
+		Points = points;
+		Faces = faces;
+		BounceCount = bounceCount;
+		Power = 1.0;
+		Amplitude = amplitude;
+		EscapesToFarField = escapesToFarField;
+		Truncated = truncated;
 	}
 }

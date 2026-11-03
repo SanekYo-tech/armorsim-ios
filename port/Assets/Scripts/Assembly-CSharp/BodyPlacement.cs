@@ -12,9 +12,17 @@ public sealed class BodyPlacement
 
 	public BodyPlacement(IShotObject obj, float standoffMm, Quaternion orientation, Vector2 aimOffsetMm)
 	{
+		Object = obj;
+		StandoffMm = standoffMm;
+		Orientation = orientation;
+		AimOffsetMm = aimOffsetMm;
 	}
 
 	public BodyPlacement(IShotObject obj, float standoffMm)
 	{
+		Object = obj;
+		StandoffMm = standoffMm;
+		Orientation = Quaternion.identity;
+		AimOffsetMm = Vector2.zero;
 	}
 }

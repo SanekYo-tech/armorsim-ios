@@ -8,5 +8,7 @@ public sealed class BodyScene
 
 	public BodyScene(BodyShotSetup shot, IReadOnlyList<BodyPlacement> placements)
 	{
+		Shot = shot;
+		Placements = placements;
 	}
 }

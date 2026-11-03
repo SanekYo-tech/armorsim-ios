@@ -25,7 +25,27 @@ public class WorkshopManifest
 
 	public string sourceSaveId;
 
-	public SimFamily Family => SimFamily.Analytic3D;
+	public SimFamily Family
+	{
+		get
+		{
+			if (Enum.TryParse<SimFamily>(family, out var result))
+			{
+				return result;
+			}
+			return SimFamily.Analytic3D;
+		}
+	}
 
-	public TargetSection Section => TargetSection.Hull;
+	public TargetSection Section
+	{
+		get
+		{
+			if (Enum.TryParse<TargetSection>(section, out var result))
+			{
+				return result;
+			}
+			return TargetSection.Hull;
+		}
+	}
 }

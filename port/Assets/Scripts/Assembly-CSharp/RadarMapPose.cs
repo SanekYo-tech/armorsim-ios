@@ -1,3 +1,4 @@
+using System;
 using Unity.Mathematics;
 
 public struct RadarMapPose
@@ -16,7 +17,7 @@ public struct RadarMapPose
 
 	public bool Finished;
 
-	public double LoadFactor => 0.0;
+	public double LoadFactor => 1.0 / Math.Cos(Bank);
 
-	public double TurnRate => 0.0;
+	public double TurnRate => (Speed > 0.0) ? (Math.Tan(Bank) * 9.80665 / Speed) : 0.0;
 }

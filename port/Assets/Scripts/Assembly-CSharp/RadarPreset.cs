@@ -22,15 +22,15 @@ public readonly struct RadarPreset
 
 	public RadarPreset(string id, string bandLetter, double defaultFrequencyHz, double minimumHz, double maximumHz)
 	{
-		Id = null;
-		NameKey = null;
-		BandLetter = null;
-		DefaultFrequencyHz = 0.0;
-		MinimumHz = 0.0;
-		MaximumHz = 0.0;
-		RoleKey = null;
-		ExamplesKey = null;
-		Provenance = null;
-		Source = null;
+		Id = id;
+		NameKey = "radar.preset." + id;
+		BandLetter = bandLetter;
+		DefaultFrequencyHz = defaultFrequencyHz;
+		MinimumHz = minimumHz;
+		MaximumHz = maximumHz;
+		RoleKey = "radar.role." + id;
+		ExamplesKey = "radar.example." + id;
+		Provenance = "ASSUMED";
+		Source = "RADAR-2 Appendix A; public band/example context: Docs/RADAR_primer_2026-09-23.md";
 	}
 }

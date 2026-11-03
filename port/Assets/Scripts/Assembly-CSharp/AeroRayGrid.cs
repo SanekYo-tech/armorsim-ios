@@ -14,5 +14,5 @@ public struct AeroRayGrid
 
 	public float MaxDistance;
 
-	public double CellArea => 0.0;
+	public double CellArea => Vector3.Cross(StepU, StepV).magnitude;
 }

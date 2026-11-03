@@ -16,11 +16,11 @@ public readonly struct LocalThickening
 
 	public LocalThickening(string name, float extraThicknessMm, IMaterialRef material, Vector2 centerMm, float radiusMm, int afterChildIndex)
 	{
-		Name = null;
-		ExtraThicknessMm = 0f;
-		Material = null;
-		CenterMm = default;
-		RadiusMm = 0f;
-		AfterChildIndex = 0;
+		Name = name;
+		ExtraThicknessMm = extraThicknessMm;
+		Material = material;
+		CenterMm = centerMm;
+		RadiusMm = radiusMm;
+		AfterChildIndex = afterChildIndex;
 	}
 }

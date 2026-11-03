@@ -14,11 +14,11 @@ public readonly struct RaySpan
 
 	public RaySpan(float enterMm, float exitMm, IMaterialRef material, float normalThicknessMm, float obliquityDeg, EntrySurface entry)
 	{
-		EnterMm = 0f;
-		ExitMm = 0f;
-		Material = null;
-		NormalThicknessMm = 0f;
-		ObliquityDeg = 0f;
-		Entry = EntrySurface.Unknown;
+		EnterMm = enterMm;
+		ExitMm = exitMm;
+		Material = material;
+		NormalThicknessMm = normalThicknessMm;
+		ObliquityDeg = obliquityDeg;
+		Entry = entry;
 	}
 }

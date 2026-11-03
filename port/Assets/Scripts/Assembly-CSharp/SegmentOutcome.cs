@@ -8,7 +8,7 @@ public readonly struct SegmentOutcome
 
 	public SegmentOutcome(ProjectileState state, IReadOnlyList<TransferEvent> transfers)
 	{
-		State = default;
-		Transfers = null;
+		State = state;
+		Transfers = transfers;
 	}
 }

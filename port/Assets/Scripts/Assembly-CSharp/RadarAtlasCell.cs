@@ -16,12 +16,12 @@ public readonly struct RadarAtlasCell
 
 	public RadarAtlasCell(int i, int j, double az, double el, double k2, double max, double sigmaHH)
 	{
-		I = 0;
-		J = 0;
-		AzimuthCentreDeg = 0.0;
-		ElevationCentreDeg = 0.0;
-		K2 = 0.0;
-		MaxSigmaHH = 0.0;
-		SigmaHH = 0.0;
+		I = i;
+		J = j;
+		AzimuthCentreDeg = az;
+		ElevationCentreDeg = el;
+		K2 = k2;
+		MaxSigmaHH = max;
+		SigmaHH = sigmaHH;
 	}
 }

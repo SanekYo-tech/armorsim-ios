@@ -16,5 +16,19 @@ public class WorkshopItem
 
 	public string detail;
 
-	public string Title => null;
+	public string Title
+	{
+		get
+		{
+			if (manifest != null && !string.IsNullOrEmpty(manifest.title))
+			{
+				return manifest.title;
+			}
+			if (!string.IsNullOrEmpty(publishedFileId))
+			{
+				return publishedFileId;
+			}
+			return "?";
+		}
+	}
 }

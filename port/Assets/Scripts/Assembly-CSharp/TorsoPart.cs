@@ -12,9 +12,9 @@ public readonly struct TorsoPart
 
 	public TorsoPart(string tissueId, TissueKind kind, Vector3 centreMm, IShotObject obj)
 	{
-		TissueId = null;
-		Kind = TissueKind.Unknown;
-		CentreMm = default;
-		Object = null;
+		TissueId = tissueId;
+		Kind = kind;
+		CentreMm = centreMm;
+		Object = obj;
 	}
 }

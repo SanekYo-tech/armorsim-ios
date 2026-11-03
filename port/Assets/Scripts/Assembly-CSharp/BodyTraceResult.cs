@@ -10,9 +10,13 @@ public sealed class BodyTraceResult
 
 	public ulong Fingerprint { get; }
 
-	public bool Rejected => false;
+	public bool Rejected => Rejections != null && Rejections.Count > 0;
 
 	public BodyTraceResult(IReadOnlyList<TraceBranch> branches, IReadOnlyList<TraceInterface> interfaces, IReadOnlyList<TraceRejection> rejections, ulong fingerprint)
 	{
+		Branches = branches;
+		Interfaces = interfaces;
+		Rejections = rejections;
+		Fingerprint = fingerprint;
 	}
 }

@@ -21,5 +21,19 @@ public struct GatherNodeForcesJob : IJobParallelFor
 
 	public void Execute(int n)
 	{
+		float fr = 0f;
+		float fz = 0f;
+		int start = nodeAdjStart[n];
+		int end = nodeAdjStart[n + 1];
+		for (int i = start; i < end; i++)
+		{
+			int elem = nodeAdjElem[i];
+			int corner = nodeAdjCorner[i];
+			int index = (corner + elem * 4) * 2;
+			fr += elemForce[index];
+			fz += elemForce[index + 1];
+		}
+		nodeFr[n] = fr;
+		nodeFz[n] = fz;
 	}
 }

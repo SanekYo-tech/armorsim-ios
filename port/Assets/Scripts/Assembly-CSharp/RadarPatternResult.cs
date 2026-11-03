@@ -24,5 +24,15 @@ public sealed class RadarPatternResult
 
 	internal RadarPatternResult(double3[] directions, double[] relativePower, double[] sigma, int azimuthSamples, int elevationSamples, bool refused, string refusalKey, double peakSigma, double elapsedMilliseconds)
 	{
+		Directions = directions;
+		RelativePower = relativePower;
+		SigmaSquareMeters = sigma;
+		AzimuthSamples = azimuthSamples;
+		ElevationSamples = elevationSamples;
+		FirstOrderOnly = true;
+		Refused = refused;
+		RefusalKey = refusalKey;
+		PeakSigma = peakSigma;
+		ElapsedMilliseconds = elapsedMilliseconds;
 	}
 }

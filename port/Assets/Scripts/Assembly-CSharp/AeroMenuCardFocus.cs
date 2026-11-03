@@ -9,5 +9,9 @@ public sealed class AeroMenuCardFocus : MonoBehaviour, ISelectHandler, IEventSys
 
 	public void OnSelect(BaseEventData eventData)
 	{
+		if (owner != null)
+		{
+			owner.Reveal(card);
+		}
 	}
 }

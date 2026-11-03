@@ -6,7 +6,7 @@ public readonly struct TransferEvent
 
 	public TransferEvent(string kind, int atInterfaceIndex)
 	{
-		Kind = null;
-		AtInterfaceIndex = 0;
+		Kind = kind;
+		AtInterfaceIndex = atInterfaceIndex;
 	}
 }

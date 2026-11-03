@@ -8,5 +8,16 @@ public sealed class ImportedModel
 
 	public string ContentSha;
 
-	public int TriangleCount => 0;
+	public int TriangleCount
+	{
+		get
+		{
+			int num = 0;
+			foreach (ImportedPart part in parts)
+			{
+				num += ((part.triangles != null) ? (part.triangles.Length / 3) : 0);
+			}
+			return num;
+		}
+	}
 }

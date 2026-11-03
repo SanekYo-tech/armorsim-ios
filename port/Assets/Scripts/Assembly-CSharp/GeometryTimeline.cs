@@ -19,9 +19,15 @@ public sealed class GeometryTimeline : IDisposable
 
 	public bool Cancelled;
 
-	public bool HasField => false;
+	public bool HasField => fieldGridR > 0 && fieldGridZ > 0 && fieldBounds.Valid;
 
 	public void Dispose()
 	{
+		for (int i = 0; i < frames.Count; i++)
+		{
+			GeometryFrame geometryFrame = frames[i];
+			geometryFrame.Dispose();
+		}
+		frames.Clear();
 	}
 }

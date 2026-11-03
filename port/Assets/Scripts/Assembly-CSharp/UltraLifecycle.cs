@@ -7,9 +7,16 @@ public static class UltraLifecycle
 	[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
 	public static void Install()
 	{
+		if (installed)
+		{
+			return;
+		}
+		installed = true;
+		Application.quitting += OnQuit;
 	}
 
 	private static void OnQuit()
 	{
+		UltraSolveQueue.Instance.Shutdown();
 	}
 }

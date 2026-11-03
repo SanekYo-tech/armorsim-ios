@@ -6,5 +6,7 @@ public sealed class RadarPoPrepared
 
 	internal RadarPoPrepared(RadarPoTriangle[] triangles, bool[] illuminated)
 	{
+		VisibleTriangles = triangles;
+		FacetIlluminated = illuminated;
 	}
 }

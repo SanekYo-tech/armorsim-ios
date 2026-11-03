@@ -23,9 +23,27 @@ public sealed class ContactPenalty : IDisposable
 
 	public ContactPenalty(int segCapacity, int nodeCount)
 	{
+		cellStart = new NativeArray<int>(36865, Allocator.Persistent);
+		cellCursor = new NativeArray<int>(36864, Allocator.Persistent);
+		cellItems = new NativeArray<int>(Math.Max(1, segCapacity), Allocator.Persistent);
+		work = new NativeArray<double>(4, Allocator.Persistent);
+		rampDepth = new NativeArray<float>(Math.Max(1, nodeCount), Allocator.Persistent);
+		rampOffset = new NativeArray<float>(Math.Max(1, nodeCount), Allocator.Persistent);
+		nodeCFz = new NativeArray<float>(Math.Max(1, nodeCount), Allocator.Persistent);
+		nodeCFr = new NativeArray<float>(Math.Max(1, nodeCount), Allocator.Persistent);
+		nodeCFz = new NativeArray<float>(Math.Max(1, nodeCount), Allocator.Persistent);
 	}
 
 	public void Dispose()
 	{
+		cellStart.Dispose();
+		cellCursor.Dispose();
+		cellItems.Dispose();
+		work.Dispose();
+		rampDepth.Dispose();
+		rampOffset.Dispose();
+		nodeCFr.Dispose();
+		nodeCFz.Dispose();
+		nodeCFz.Dispose();
 	}
 }

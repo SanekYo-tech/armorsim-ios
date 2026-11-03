@@ -21,7 +21,7 @@ public class EraPlateMotion : MonoBehaviour
 
 	private float launchDilation;
 
-	public Vector3 VelocityWorld => default;
+	public Vector3 VelocityWorld => velocityWU;
 
 	public void Launch(Vector3 velocityWorldPerSecond, Vector3 dir)
 	{

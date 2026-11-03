@@ -12,9 +12,9 @@ public readonly struct RadarDirectionBasis
 
 	public RadarDirectionBasis(double3 toRadar, double3 horizontal, double3 vertical)
 	{
-		ToRadar = default;
-		Incident = default;
-		Horizontal = default;
-		Vertical = default;
+		ToRadar = toRadar;
+		Incident = -toRadar;
+		Horizontal = horizontal;
+		Vertical = vertical;
 	}
 }

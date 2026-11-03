@@ -14,27 +14,27 @@ public readonly struct ShellBand
 
 	public readonly float RInnerAtYMaxMm;
 
-	public bool HasExplicitInner => false;
+	public bool HasExplicitInner => !float.IsNaN(RInnerAtYMinMm) && !float.IsNaN(RInnerAtYMaxMm);
 
 	public ShellBand(float yMinMm, float yMaxMm, float rOuterAtYMinMm, float rOuterAtYMaxMm, float wallThicknessMm)
 	{
-		YMinMm = 0f;
-		YMaxMm = 0f;
-		ROuterAtYMinMm = 0f;
-		ROuterAtYMaxMm = 0f;
-		WallThicknessMm = 0f;
-		RInnerAtYMinMm = 0f;
-		RInnerAtYMaxMm = 0f;
+		YMinMm = yMinMm;
+		YMaxMm = yMaxMm;
+		ROuterAtYMinMm = rOuterAtYMinMm;
+		ROuterAtYMaxMm = rOuterAtYMaxMm;
+		WallThicknessMm = wallThicknessMm;
+		RInnerAtYMinMm = float.NaN;
+		RInnerAtYMaxMm = float.NaN;
 	}
 
 	public ShellBand(float yMinMm, float yMaxMm, float rOuterAtYMinMm, float rOuterAtYMaxMm, float wallThicknessMm, float rInnerAtYMinMm, float rInnerAtYMaxMm)
 	{
-		YMinMm = 0f;
-		YMaxMm = 0f;
-		ROuterAtYMinMm = 0f;
-		ROuterAtYMaxMm = 0f;
-		WallThicknessMm = 0f;
-		RInnerAtYMinMm = 0f;
-		RInnerAtYMaxMm = 0f;
+		YMinMm = yMinMm;
+		YMaxMm = yMaxMm;
+		ROuterAtYMinMm = rOuterAtYMinMm;
+		ROuterAtYMaxMm = rOuterAtYMaxMm;
+		WallThicknessMm = wallThicknessMm;
+		RInnerAtYMinMm = rInnerAtYMinMm;
+		RInnerAtYMaxMm = rInnerAtYMaxMm;
 	}
 }

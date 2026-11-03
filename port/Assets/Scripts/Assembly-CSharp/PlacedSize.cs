@@ -12,5 +12,5 @@ public struct PlacedSize
 
 	public bool overridesThickness;
 
-	public Vector3 PhysicalMeters => default;
+	public Vector3 PhysicalMeters => new Vector3(widthM, heightM, thicknessMM / 1000f);
 }

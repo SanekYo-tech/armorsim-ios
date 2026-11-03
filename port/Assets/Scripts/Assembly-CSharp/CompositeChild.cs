@@ -6,7 +6,7 @@ public readonly struct CompositeChild
 
 	public CompositeChild(IShotObject child, float gapBeforeMm)
 	{
-		Child = null;
-		GapBeforeMm = 0f;
+		Child = child;
+		GapBeforeMm = gapBeforeMm;
 	}
 }

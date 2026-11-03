@@ -10,5 +10,8 @@ public sealed class ChannelReport
 
 	public ChannelReport(IReadOnlyList<ChannelEntry> crossed, float totalDepthMm, bool exitedFar)
 	{
+		Crossed = crossed;
+		TotalDepthMm = totalDepthMm;
+		ExitedFar = exitedFar;
 	}
 }
