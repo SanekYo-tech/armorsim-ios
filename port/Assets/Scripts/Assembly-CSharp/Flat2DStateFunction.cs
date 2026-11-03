@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public sealed class Flat2DStateFunction : MonoBehaviour
@@ -188,6 +189,77 @@ public sealed class Flat2DStateFunction : MonoBehaviour
 
 	private void Curves(ComputeShader cs)
 	{
+		float num = StiffestDt();
+		CT.Info(string.Format("ступень B1 при ЗАКРЕПЛЁННОМ шаге dt* = {0:E6} с ", num) + "(§1: гейт A3′ отныне здесь; шаг Куранта — цена схемы, не дефект)");
+		Flat2DScene.Body body = Flat2DStage2Tests.Squeeze(120, 30, Dx, Push);
+		Flat2DScene.Domain(body, 0.01f, out Vector2 min, out Vector2 max);
+		List<Sample> list = new List<Sample>();
+		Flat2DSolver s = new Flat2DSolver(cs);
+		s.ArtificialViscosity = false;
+		s.Plasticity = false;
+		s.FixedTimeStep = num;
+		Flat2DMaterialBlock[] mats = Mats(zeroG: true, zeroGamma: true);
+		s.Init(body.pos, body.vel, body.mat, mats, Dx, min, max);
+		s.Steps(Warm);
+		list.Add(Snap(s, 0));
+		for (int i = 0; i < Chunks; i++)
+		{
+			s.Steps(Chunk);
+			list.Add(Snap(s, (i + 1) * Chunk));
+		}
+		s.Dispose();
+		Sample sample = list[0];
+		Sample sample2 = list[list.Count - 1];
+		CT.Info("── S2: обе величины сняты С ОДНОГО состояния, одной выборкой");
+		CT.Info("шаг      E_путь, Дж     E_сост, Дж    Σmu внутр    Σmu гран.   внутр.");
+		foreach (Sample item in list)
+		{
+			CT.Info(string.Format("{0,6}  {1,12:F4}  {2,12:F4}  {3,10:F4}  ", item.step, item.ePath + item.ke, item.uInt + item.ke + item.uRest, item.uInt) + string.Format("{0,10:F4}  {1,5} ({2:F1} %)", item.uRest, item.interior, (double)item.interior * 100.0 / 5040.0));
+		}
+		CT.Info(string.Format("── S2 итог по ВСЕМУ окну ({0} шагов): ", Chunks * Chunk) + string.Format("E_путь {0:F4} → {1:F4} Дж, дрейф {2:F4} %; ", sample.ePath + sample.ke, sample2.ePath + sample2.ke, Math.Abs(sample2.ePath + sample2.ke - (sample.ePath + sample.ke)) / Math.Abs(sample.ePath + sample.ke) * 100.0) + string.Format("E_сост {0:F4} → {1:F4} Дж, дрейф {2:F4} %", sample.uInt + sample.ke + sample.uRest, sample2.uInt + sample2.ke + sample2.uRest, Math.Abs(sample2.uInt + sample2.ke + sample2.uRest - (sample.uInt + sample.ke + sample.uRest)) / Math.Abs(sample.uInt + sample.ke + sample.uRest) * 100.0));
+		CT.Info(string.Format("── S3, разделение: внутренние {0} → {1} из 5040; ", sample.interior, sample2.interior) + string.Format("Σm·u внутри {0:F4} → {1:F4} Дж; на границе {2:F4} → {3:F4} Дж", sample.uInt, sample2.uInt, sample.uRest, sample2.uRest));
+		int num2 = 0;
+		for (int j = 0; j < list.Count; j++)
+		{
+			if ((double)list[j].interior >= (double)sample.interior * 0.9)
+			{
+				num2 = j;
+			}
+		}
+		Sample sample3 = list[num2];
+		double num3 = sample3.step - sample.step;
+		double num4 = (double)num * num3;
+		if (num3 > 0.0)
+		{
+			double num5 = (sample3.ke + sample3.ePath - (sample.ePath + sample.ke)) / num4;
+			double num6 = (sample3.uInt + sample3.ke + sample3.uRest - (sample.uInt + sample.ke + sample.uRest)) / num4;
+			CT.Info(string.Format("── S4, окно с ЦЕЛОЙ посылкой: шаги {0}…{1} ", sample.step, sample3.step) + string.Format("({0} шагов, {1:F2} мкс), внутренних ", num3, num4 * 1000000.0) + string.Format("{0} → {1} (≥ 90 % от старта)", sample.interior, sample3.interior));
+			CT.Info(string.Format("   E_путь: {0:F4} → {1:F4} Дж ⇒ {2:E4} Вт ", sample.ePath + sample.ke, sample3.ke + sample3.ePath, num5) + string.Format("({0:F4} % за окно)", (sample3.ke + sample3.ePath - (sample.ePath + sample.ke)) / (sample.ePath + sample.ke) * 100.0));
+			CT.Info(string.Format("   E_сост: {0:F4} → {1:F4} Дж ⇒ {2:E4} Вт ", sample.uInt + sample.ke + sample.uRest, sample3.uInt + sample3.ke + sample3.uRest, num6) + string.Format("({0:F4} % за окно)", (sample3.uInt + sample3.ke + sample3.uRest - (sample.uInt + sample.ke + sample.uRest)) / (sample.uInt + sample.ke + sample.uRest) * 100.0));
+		}
+		else
+		{
+			CT.Info("── S4: окно с целой посылкой пусто — доля внутренних падает ниже 90 % уже на первом отсчёте. Скорость на нём не меряется.");
+		}
+		double num7 = (sample3.ke + sample3.ePath - (sample.ePath + sample.ke)) / (sample.ePath + sample.ke);
+		double num8 = (sample3.uInt + sample3.ke + sample3.uRest - (sample.uInt + sample.ke + sample.uRest)) / (sample.uInt + sample.ke + sample.uRest);
+		CT.Info("── S3, ЧТЕНИЕ ВЕТВИ:");
+		if (Math.Abs(num7) < 0.01 && Math.Abs(num8) < 0.01)
+		{
+			CT.Info(string.Format("   ⭐⭐ ОБЕ ОГРАНИЧЕНЫ: E_путь {0:F4} %, E_сост ", num7 * 100.0) + string.Format("{0:F4} % ⇒ накопитель `e` согласован с траекторией ρ. ", num8 * 100.0) + "⚠️ Их СОГЛАСИЕ ожидаемо по построению (§3 делает Σm·e квадратурой того же интеграла); доказательна их МАЛОСТЬ, а не их близость.");
+		}
+		else if (Math.Abs(num8) < Math.Abs(num7) * 0.1 && Math.Abs(num7) > 1.0)
+		{
+			CT.Info(string.Format("   ⭐⭐ E_сост ограничена ({0:F2} %), E_путь растёт ", num8 * 100.0) + string.Format("({0:F2} %) ⇒ течь ЦЕЛИКОМ в интегрировании `e`, ", num7 * 100.0) + "динамика цела.");
+		}
+		else if (Math.Abs(num8) > Math.Abs(num7) * 0.5)
+		{
+			CT.Info(string.Format("   ⛔ РАСТУТ ОБЕ ({0:F2} % против {1:F2} %) ⇒ ", num8 * 100.0, num7 * 100.0) + "течь в паре «сила–плотность», `e` невиновна.");
+		}
+		else
+		{
+			CT.Info(string.Format("   ❓ расходятся третьим образом ({0:F2} % против ", num8 * 100.0) + string.Format("{0:F2} %) ⇒ обе кривые в отчёт, приписывания НЕТ.", num7 * 100.0));
+		}
 	}
 
 	private void CommonMode(ComputeShader cs)

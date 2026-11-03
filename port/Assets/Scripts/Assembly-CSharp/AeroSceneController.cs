@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 public sealed class AeroSceneController : MonoBehaviour
@@ -230,6 +231,132 @@ public sealed class AeroSceneController : MonoBehaviour
 
 	private void BuildUI()
 	{
+		if (EventSystem.current == null)
+		{
+			new GameObject("Aero EventSystem", typeof(EventSystem), typeof(StandaloneInputModule)).transform.SetParent(base.transform, worldPositionStays: false);
+		}
+		canvas = MenuTheme.MakeRect(base.transform, "AeroCanvas");
+		canvas.gameObject.AddComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+		canvas.gameObject.AddComponent<GraphicRaycaster>();
+		CanvasScaler canvasScaler = canvas.gameObject.AddComponent<CanvasScaler>();
+		canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+		canvasScaler.referenceResolution = new Vector2(1920f, 1080f);
+		canvasScaler.matchWidthOrHeight = 0.5f;
+		RectTransform rect = MenuTheme.MakeRect(canvas, "Controls");
+		rect.anchorMin = new Vector2(0.68f, 0f);
+		rect.anchorMax = Vector2.one;
+		rect.offsetMin = new Vector2(8f, 16f);
+		rect.offsetMax = new Vector2(-16f, -16f);
+		MenuTheme.AddImage(rect, MenuTheme.SurfaceAlt).raycastTarget = true;
+		RectTransform content;
+		MenuTheme.Stretch((RectTransform)MenuTheme.MakeScrollList(rect, "ControlsScroll", out content).transform, new Vector2(20f, 20f), new Vector2(-20f, -20f));
+		content.GetComponent<VerticalLayoutGroup>().spacing = 8f;
+		Label(content, "Title", "aero.title", 32f, 40f);
+		RectTransform rect2 = Row(content, 40f);
+		MenuTheme.MakeButton(rect2, "Import", "aero.import", 40f, PickFile, 18f);
+		MenuTheme.MakeButton(rect2, "Sphere", "aero.sphere", 40f, ShowSphere, 18f);
+		modelName = AeroReadout.Attach(Label(content, "ModelName", "aero.sphere", 18f, 28f), "aero.sphere");
+		source = AeroReadout.Attach(Label(content, "SourceSize", "aero.source", 17f, 54f), "aero.source");
+		status = AeroReadout.Attach(Label(content, "Status", "aero.ready", 18f, 64f), "aero.ready");
+		ratio = AeroReadout.Attach(Label(content, "RelativeDrag", "aero.pending", 23f, 56f), "aero.pending");
+		stats = AeroReadout.Attach(Label(content, "Measurements", "aero.pending", 18f, 110f), "aero.pending");
+		yaw = Angle(content, "Yaw", "aero.yaw", -180f, 180f);
+		pitch = Angle(content, "Pitch", "aero.pitch", -90f, 90f);
+		Label(content, "Rays", "aero.rays", 18f, 24f);
+		RectTransform rect3 = Row(content, 34f);
+		foreach (int n in new int[3] { 128, 256, 512 })
+		{
+			Button button = MenuTheme.MakeButton(rect3, "Grid" + n, "aero.grid." + n, 34f, delegate
+			{
+				resolution = n;
+				RefreshGridSelection();
+				Changed();
+			}, 17f);
+			MenuTheme.LabelOf(button).characterSpacing = 0f;
+			gridButtons.Add(n, button);
+		}
+		RefreshGridSelection();
+		Label(content, "FlowSettings", "aero.flow.settings", 18f, 28f);
+		Button cloudButton = MenuTheme.MakeButton(content, "CloudDisplay", showClouds ? "aero.clouds.on" : "aero.clouds.off", 36f, null, 17f);
+		MenuTheme.SetSelectedVisual(cloudButton, showClouds);
+		cloudButton.onClick.AddListener(delegate
+		{
+			showClouds = !showClouds;
+			PlayerPrefs.SetInt("armorsim.aero.clouds", showClouds ? 1 : 0);
+			PlayerPrefs.Save();
+			LocalizedLabel component = cloudButton.GetComponent<LocalizedLabel>();
+			component.SetKey(showClouds ? "aero.clouds.on" : "aero.clouds.off");
+			MenuTheme.SetSelectedVisual(cloudButton, showClouds);
+			ApplyFlowVisibility();
+		});
+		densityCaption = AeroReadout.Attach(Label(content, "DensityLabel", "aero.density", 18f, 26f), "aero.density");
+		RectTransform rect4 = Row(content, 34f);
+		foreach (int n2 in new int[4] { 80, 320, 1280, 2560 })
+		{
+			Button button2 = MenuTheme.MakeButton(rect4, "Density" + n2, "aero.density." + n2, 34f, delegate
+			{
+				lineDensity = n2;
+				if (paths != null)
+				{
+					paths.SetDensity(n2);
+				}
+				RefreshDensitySelection();
+			}, 17f);
+			MenuTheme.LabelOf(button2).characterSpacing = 0f;
+			densityButtons.Add(n2, button2);
+		}
+		RefreshDensitySelection();
+		RectTransform rect5 = Row(content, 36f);
+		Button streamButton = MenuTheme.MakeButton(rect5, "Paths", "aero.paths.on", 36f, null, 17f);
+		MenuTheme.SetSelectedVisual(streamButton, showPaths);
+		streamButton.onClick.AddListener(delegate
+		{
+			showPaths = !showPaths;
+			LocalizedLabel component = streamButton.GetComponent<LocalizedLabel>();
+			component.SetKey(showPaths ? "aero.paths.on" : "aero.paths.off");
+			MenuTheme.SetSelectedVisual(streamButton, showPaths);
+			ApplyFlowVisibility();
+		});
+		MenuTheme.MakeButton(rect5, "Frame", "aero.frame", 36f, delegate
+		{
+			orbit.Frame();
+		}, 17f);
+		Button wakeButton = MenuTheme.MakeButton(content, "WakeVortices", "aero.wake.on", 36f, null, 17f);
+		MenuTheme.SetSelectedVisual(wakeButton, wakeVortices);
+		wakeButton.onClick.AddListener(delegate
+		{
+			wakeVortices = !wakeVortices;
+			if (paths != null)
+			{
+				paths.SetWakeVortices(wakeVortices);
+			}
+			LocalizedLabel component = wakeButton.GetComponent<LocalizedLabel>();
+			component.SetKey(wakeVortices ? "aero.wake.on" : "aero.wake.off");
+			MenuTheme.SetSelectedVisual(wakeButton, wakeVortices);
+		});
+		flip = MenuTheme.MakeButton(content, "FlipNormals", "aero.flip", 40f, FlipNormals, 18f);
+		flip.gameObject.SetActive(false);
+		MenuTheme.MakeButton(content, "Back", "aero.menu", 38f, AppFlow.OpenMenu, 18f);
+		TextMeshProUGUI textMeshProUGUI = Label(canvas, "StreamlineCaveat", "aero.clouds.disclaimer", 17f, 60f);
+		textMeshProUGUI.color = ResultPalette.Miss;
+		MenuTheme.Place(textMeshProUGUI.rectTransform, Vector2.zero, Vector2.zero, new Vector2(28f, 18f), new Vector2(1220f, 58f));
+		TextMeshProUGUI textMeshProUGUI2 = Label(canvas, "CameraHelp", "aero.camera", 18f, 46f);
+		textMeshProUGUI2.color = ResultPalette.Miss;
+		MenuTheme.Place(textMeshProUGUI2.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(28f, -22f), new Vector2(1220f, 46f));
+		RectTransform rect6 = MenuTheme.MakeRect(canvas, "CpLegend");
+		MenuTheme.Place(rect6, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(28f, -88f), new Vector2(350f, 80f));
+		TextMeshProUGUI textMeshProUGUI3 = Label(rect6, "CpTitle", "aero.cp", 18f, 24f);
+		textMeshProUGUI3.color = ResultPalette.Miss;
+		MenuTheme.Place(textMeshProUGUI3.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, new Vector2(320f, 24f));
+		for (int j = 0; j < 40; j++)
+		{
+			RectTransform rect7 = MenuTheme.MakeRect(rect6, "CpColor" + j);
+			MenuTheme.Place(rect7, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2((float)j * 8f, -28f), new Vector2(8f, 16f));
+			MenuTheme.AddImage(rect7, AeroDisplay.PressureColor(((float)j + (float)j) / 39f));
+		}
+		TextMeshProUGUI textMeshProUGUI4 = Label(rect6, "CpTicks", "aero.cp.ticks", 17f, 24f);
+		textMeshProUGUI4.color = ResultPalette.Miss;
+		MenuTheme.Place(textMeshProUGUI4.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, -50f), new Vector2(320f, 24f));
 	}
 
 	private static void Height(RectTransform rect, float height)

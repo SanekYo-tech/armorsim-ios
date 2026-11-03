@@ -1049,6 +1049,188 @@ public static class SuperSolveJob
 
 	private static void RecordEnd(SuperTapeRecorder.Summary s, string tapePath, bool completed, string failure)
 	{
+		SuperRunRecord rec = _record;
+		_record = null;
+		Stopwatch wallSw = _wallSw;
+		_wallSw = null;
+		SuperRunMeter meter = _meter;
+		_meter = null;
+		meter?.End();
+		if (rec == null)
+		{
+			return;
+		}
+		if (wallSw != null)
+		{
+			wallSw.Stop();
+			rec.actual.wallS = wallSw.Elapsed.TotalSeconds;
+		}
+		rec.completed = completed;
+		rec.ok = completed && s != null && s.ok;
+		rec.failure = failure ?? s?.failure ?? "";
+		if (failure != null)
+		{
+			rec.failClass = SuperRunRecord.FailClass.SolverRefused;
+		}
+		else if (s != null)
+		{
+			rec.failClass = s.failClass;
+		}
+		else
+		{
+			rec.failClass = SuperRunRecord.FailClass.None;
+		}
+		if (s != null)
+		{
+			rec.frames = s.frames;
+			rec.tapeBytes = s.fileBytes;
+			rec.actual.particles = s.shot.particles;
+			rec.actual.gridNodes = s.shot.gridNodes;
+			rec.actual.steps = s.shot.steps;
+			rec.actual.tapeS = (s.shot.hookWaitMs + s.shot.keyframeHookMs) / 1000.0 + s.drainS;
+			rec.actual.solveS = ((s.shot.wallClockMs - s.shot.keyframeHookMs) - s.shot.hookWaitMs - s.shot.yieldMs) / 1000.0;
+			if (rec.actual.wallS > 0.0 && s.shot.wallClockMs > 0.0)
+			{
+				rec.actual.bakeUploadS = Math.Max(0.0, rec.actual.wallS - s.shot.wallClockMs / 1000.0 - s.drainS);
+			}
+			if (!s.ok && string.IsNullOrEmpty(rec.invalidReason))
+			{
+				rec.invalidReason = s.failure ?? "прогон помечен недействительным";
+			}
+			s.stages.FillRecord(rec.hookStages);
+			rec.fieldsPath = s.fieldsPath ?? "";
+			rec.fieldsPathWhy = s.fieldsPathWhy ?? "";
+			rec.reconReadback = s.reconReadback ?? "";
+			rec.perf.reconSlots = s.reconSlots;
+			rec.perf.reconSlotWaits = s.reconSlotWaits;
+			rec.perf.reconSlotWaitS = s.reconSlotWaitS;
+			rec.perf.reconFramesGpu = s.reconFramesGpu;
+			rec.perf.reconVertexRequests = s.reconVertexRequests;
+			rec.perf.reconHookMsMean = s.reconHookMsMean;
+			rec.perf.reconHookMsMax = s.reconHookMsMax;
+			rec.perf.reconHookGpuMs = s.reconHookGpuMs;
+			rec.perf.reconReadbackMsP95 = s.reconReadbackMsP95;
+			rec.perf.reconVramMB = s.reconVramMB;
+			rec.perf.reconKeyMismatch = s.reconKeyMismatch;
+			rec.perf.reconNodeMismatch = s.reconNodeMismatch;
+			rec.perf.reconKeysChecked = s.reconKeysChecked;
+			rec.perf.reconAabbChecks = s.reconAabbChecks;
+			rec.perf.bakeS = s.shot.bakeMs / 1000.0;
+			rec.perf.uploadS = s.shot.uploadMs / 1000.0;
+			rec.perf.stepLoopS = s.shot.stepLoopMs / 1000.0;
+			rec.perf.hookWaitS = s.shot.hookWaitMs / 1000.0;
+			rec.perf.yieldS = s.shot.yieldMs / 1000.0;
+			rec.perf.drainS = s.drainS;
+			rec.perf.inFlightK = s.inFlightK;
+			rec.perf.inFlightKStart = s.inFlightKStart;
+			rec.perf.inFlightKMin = s.inFlightKMin;
+			rec.perf.intraDopMin = s.intraDopMin;
+			rec.perf.intraDopMax = s.intraDopMax;
+			rec.perf.lookAheadQ = s.lookAheadQ;
+			rec.perf.readyCapMB = s.readyCapMB;
+			rec.perf.perFrameBytesMeasured = s.perFrameBytesMeasured;
+			rec.perf.perFrameBytesModel = s.perFrameBytesModel;
+			rec.perf.paceYieldS = s.shot.paceYieldMs / 1000.0;
+			rec.perf.chunkDispatches = s.shot.chunkDispatches;
+			rec.perf.regionFirstFraction = s.shot.regionFirstFraction;
+			rec.perf.regionLastFraction = s.shot.regionLastFraction;
+			rec.perf.displayMarginM = s.shot.displayMarginM;
+			rec.perf.solverMarginM = s.shot.solverMarginM;
+			if (s.shot.sparse != null && s.shot.sparse.sparse)
+			{
+				rec.perf.sparseVBlocks = s.shot.sparse.vblocks;
+				rec.perf.sparsePoolBlocks = s.shot.sparse.poolBlocks;
+				rec.perf.sparseActiveFirst = s.shot.sparse.activeFirst;
+				rec.perf.sparseActiveMax = s.shot.sparse.activeMax;
+				rec.perf.sparseGrowths = s.shot.sparse.growths;
+				rec.perf.sparseTableBytes = s.shot.sparse.tableBytes;
+				rec.perf.sparsePoolBytes = s.shot.sparse.poolBytes;
+			}
+			if (s.pacer != null)
+			{
+				rec.perf.paceMsPerStep = s.pacer.MsPerStep;
+				rec.perf.paceStepsMin = ((s.pacer.minStepsPerFrame == int.MaxValue) ? 0 : s.pacer.minStepsPerFrame);
+				rec.perf.paceStepsMax = s.pacer.maxStepsPerFrame;
+				rec.perf.paceYieldCount = s.pacer.yields;
+				rec.perf.paceCalibrations = s.pacer.calibrations;
+			}
+			rec.perf.intraDop = s.intraDop;
+			rec.perf.poolHighWater = s.poolHighWater;
+			rec.perf.framesBuiltOffMain = s.framesBuiltOffMain;
+			rec.perf.perFrameBytesEstimate = s.perFrameBytesEstimate;
+			rec.perf.availablePhysMB = s.availablePhysMB;
+			if (s.bytesFramesCounted > 0)
+			{
+				double bytesToMb = 9.5367431640625E-07;
+				rec.perf.frameLatticeMaxMB = (double)s.bytesLatticeMax * bytesToMb;
+				rec.perf.frameLatticeMeanMB = s.bytesLatticeMean * bytesToMb;
+				rec.perf.frameMeshMaxMB = (double)s.bytesMeshMax * bytesToMb;
+				rec.perf.frameMeshMeanMB = s.bytesMeshMean * bytesToMb;
+				rec.perf.frameFieldsMaxMB = (double)s.bytesFieldsMax * bytesToMb;
+				rec.perf.frameFieldsMeanMB = s.bytesFieldsMean * bytesToMb;
+				rec.perf.framePayloadMaxMB = (double)s.bytesPayloadMax * bytesToMb;
+				rec.perf.framePayloadMeanMB = s.bytesPayloadMean * bytesToMb;
+				rec.perf.frameSnapshotMB = (double)s.bytesSnapshot * bytesToMb;
+				rec.perf.frameHonestMaxMB = (double)s.bytesHonestMax * bytesToMb;
+				rec.perf.frameHonestMeanMB = s.bytesHonestMean * bytesToMb;
+				rec.perf.frameBodyMaxMB = (double)s.bytesBodyMaxSeen * bytesToMb;
+				rec.perf.frameDensityMaxMB = (double)s.bytesDensityMax * bytesToMb;
+				rec.perf.frameDensityWorkMaxMB = (double)s.bytesDensityWorkMax * bytesToMb;
+				rec.perf.frameHashMaxMB = (double)s.bytesHashMax * bytesToMb;
+			}
+		}
+		if (meter != null)
+		{
+			rec.perf.firstMoveMs = meter.firstMoveMs;
+			rec.perf.stallMaxMs = meter.maxMoveMs;
+			rec.perf.topStalls = meter.TopStalls();
+			rec.perf.gcCount = meter.gcCount;
+			rec.perf.moves = meter.moves;
+			rec.perf.cpuUtil = meter.cpuUtil;
+			rec.perf.peakWorkingSetMB = (double)meter.peakWorkingSetBytes / 1048576.0;
+			rec.perf.peakManagedMB = (double)meter.peakManagedBytes / 1048576.0;
+			rec.perf.processPeakWorkingSetMB = (double)meter.processPeakWorkingSetBytes / 1048576.0;
+			rec.perf.pauseGaps = meter.pause.gaps;
+			rec.perf.pauseSumS = meter.pause.gapSumMs / 1000.0;
+			rec.perf.pauseMaxMs = meter.pause.gapMaxMs;
+			rec.perf.pauseShareOfWall = meter.pause.ShareOfWall;
+			rec.perf.pauseGcsInside = meter.pause.gapGcs;
+			rec.perf.cpuP10 = meter.cpuP10;
+			rec.perf.cpuP50 = meter.cpuP50;
+			rec.perf.cpuMinSample = meter.cpuMin;
+			rec.perf.cpuSamples = meter.util.Count;
+			rec.perf.occBuilding = meter.occBuilding;
+			rec.perf.occInFlight = meter.occInFlight;
+			rec.perf.occReadyUnwritten = meter.occReadyUnwritten;
+			rec.perf.kdopChanges = meter.kdopChanges;
+			rec.perf.pauseFloorGaps = PauseFloorGaps;
+			rec.perf.pauseFloorSumS = PauseFloorSumS;
+			rec.perf.pauseFloorWallS = PauseFloorWallS;
+		}
+		int nativeFailures = 0;
+		if (_logMark >= 0)
+		{
+			nativeFailures = SuperAllocAudit.NativeLogFailuresSince(_logMark);
+		}
+		rec.nativeLogFailures = nativeFailures;
+		if (nativeFailures > 0 && string.IsNullOrEmpty(rec.invalidReason))
+		{
+			rec.invalidReason = string.Format("журнал Unity сообщил о провалах выделения буфера: {0}", nativeFailures);
+		}
+		if (!string.IsNullOrEmpty(tapePath))
+		{
+			rec.Save(SuperRunRecord.SidecarPathFor(tapePath));
+		}
+		SuperRunLedger.Append(rec);
+		_lastRecord = rec;
+		LastRecord = rec;
+		string[] array = new string[5];
+		array[0] = string.Format("[Super] Цена: предсказано {0:F3} с счёта ", rec.predicted.solveS);
+		array[1] = string.Format("(полоса {0:F3}…{1:F3}), ", rec.predicted.solveLowS, rec.predicted.solveHighS);
+		array[2] = string.Format("фактически {0:F3} с счёта + {1:F3} с ленты", rec.actual.solveS, rec.actual.tapeS);
+		array[3] = (rec.CountsForBand() ? "" : string.Format(" — строка НЕ идёт в полосу: {0}", string.IsNullOrEmpty(rec.invalidReason) ? (completed ? "прогон неудачен" : "прогон не завершён") : rec.invalidReason));
+		array[4] = ".";
+		Debug.Log(string.Concat(array));
 	}
 
 	public static void ForgetTape(string path)

@@ -3,9 +3,8 @@
 // SetInformational, FromBox, PlaceLegacyLayer, AlignInPlane, MeshOnLine, ShiftZ, Dot, Cross, ObbOf,
 // Finite, SelfCheck (try/catch-обёртка над SelfCheckCore), SpecTipNeedForCheck, CheckSegment,
 // InsideBox, Legacy, LegacyOff, Posed, PoseTR, RotX, RotY, RotXRad, Rodrigues, Rotated,
-// BakerFrame.Point/Dir, D3, Obb.E, .cctor.
-// НЕ восстановлены: TipZForClearance (обе перегрузки), RodColumnsBoxNeed, SpecTipNeed, BruteTipNeed,
-// MeshTipNeed, MeshSurfaceEntry, SelfCheck, SelfCheckCore.
+// BakerFrame.Point/Dir, D3, Obb.E, .cctor, SpecTipNeed, MeshTipNeed, MeshSurfaceEntry.
+// НЕ восстановлены: TipZForClearance (обе перегрузки), RodColumnsBoxNeed, BruteTipNeed, SelfCheckCore.
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -417,8 +416,50 @@ public static class SuperScenePose
 
 	private static double SpecTipNeed(in SuperPlateSpec sp, float s, double r, double g, string name, ref long visited)
 	{
-		// PARTIAL: тело не восстановлено (0x180750EF0)
-		return 0.0;
+		SuperBaker.PlateFrame(in sp, out Vector3 centre, out Vector3 u, out Vector3 v, out Vector3 n, out float hu, out float hv);
+		if (!Finite(centre) || !Finite(u) || !Finite(v) || !Finite(n))
+		{
+			throw new InvalidOperationException("SuperScenePose.TipZForClearance: рамка тела «" + name + "» не конечна.");
+		}
+		Lattice(in sp, s, out int nt, out int nu, out int nv);
+		double reach = r + g;
+		double num = s + reach;
+		double num2 = (double)(nv - 1) * 0.5 * (double)s;
+		double num3 = Math.Max(Math.Abs((double)s * 0.5 - (double)sp.thicknessM * 0.5), ((double)nt - 0.5) * (double)s - (double)sp.thicknessM * 0.5);
+		double num4 = (double)(nu - 1) * 0.5 * (double)s;
+		double num5 = Math.Sqrt((double)u.x * (double)u.x + (double)u.y * (double)u.y);
+		double num6 = Math.Sqrt(num4 * num4 + num2 * num2 + num3 * num3);
+		if (num5 - (num6 * 1.001 + 1E-09) > num)
+		{
+			return double.NegativeInfinity;
+		}
+		double num7 = (double)u.x * (double)u.x + (double)u.y * (double)u.y;
+		double num8 = (double)v.x * (double)v.x + (double)v.y * (double)v.y;
+		double num9 = Math.Max(num7, num8);
+		if (num9 < 0.25)
+		{
+			throw new InvalidOperationException(string.Format("SuperScenePose.TipZForClearance: рамка тела «{0}» вырождена (|a.xy|² = {1:G3} < 0.25) — ", name, num9) + "у ортонормированной тройки так не бывает.");
+		}
+		double result = double.NegativeInfinity;
+		for (int i = 0; i < nt; i++)
+		{
+			float lz = ((float)i + 0.5f) * s - sp.thicknessM * 0.5f;
+			for (int j = 0; j < nv; j++)
+			{
+				float ly = ((float)j - (float)(nv - 1) * 0.5f) * s;
+				for (int k = 0; k < nu; k++)
+				{
+					float lx = ((float)k - (float)(nu - 1) * 0.5f) * s;
+					double num10 = PointNeed(sp.hasPose, centre, u, v, n, lx, ly, lz, r, g, reach);
+					visited++;
+					if (num10 > result)
+					{
+						result = num10;
+					}
+				}
+			}
+		}
+		return result;
 	}
 
 	private static bool IndexWindow(double lo, double hi, float s, double half, int count, out int iLo, out int iHi)
@@ -591,8 +632,48 @@ public static class SuperScenePose
 
 	public static double MeshTipNeed(SuperMeshVoxels vx, int part, in SuperClip clip, float s, float rodSpacing, float r, float g)
 	{
-		// PARTIAL: тело не восстановлено (0x180747740)
-		return 0.0;
+		if (vx == null || part < 0 || part >= vx.parts.Length)
+		{
+			return double.NegativeInfinity;
+		}
+		string text = string.Concat(string.Format("{0}#{1}#{2}:{3}:", vx.key, part, clip.centre.x, clip.centre.y), string.Format("{0}:{1}:{2}:", clip.centre.z, clip.n.z, clip.u.x), string.Format("{0}#{1}:{2}:", clip.v.y, s, rodSpacing), string.Format("{0}:{1}", r, g));
+		lock (_meshTipCache)
+		{
+			if (_meshTipCache.TryGetValue(text, out var value))
+			{
+				return value;
+			}
+		}
+		double num = double.NegativeInfinity;
+		double num2 = (double)s * 0.8660254037844386;
+		int[] cells = vx.parts[part].cells;
+		for (int i = 0; i < cells.Length; i += 3)
+		{
+			Vector3 vector = clip.CellCentre(cells[i], cells[i + 1], cells[i + 2], s);
+			double num3 = Math.Sqrt((double)vector.x * (double)vector.x + (double)vector.y * (double)vector.y);
+			if ((double)r >= num3)
+			{
+				num = Math.Max(num, (double)vector.z + (double)g);
+			}
+			else if ((double)(r + g) > num3)
+			{
+				double num4 = (double)g * (double)g - (num3 - (double)r) * (num3 - (double)r);
+				num = Math.Max(num, (double)vector.z + Math.Sqrt(num4));
+			}
+			if ((double)r + num2 >= num3)
+			{
+				num = Math.Max(num, (double)vector.z + num2 + (double)rodSpacing * 0.5 + 1E-06);
+			}
+		}
+		lock (_meshTipCache)
+		{
+			if (_meshTipCache.Count > 64)
+			{
+				_meshTipCache.Clear();
+			}
+			_meshTipCache[text] = num;
+		}
+		return num;
 	}
 
 	public static bool MeshOnLine(SuperMeshVoxels vx, int part, in SuperClip clip, float s, float r, out float entryZ)
@@ -623,8 +704,74 @@ public static class SuperScenePose
 
 	public static float MeshSurfaceEntry(ModelPart part, Matrix4x4 toBaker, float rodRadiusM, string keyPrefix)
 	{
-		// PARTIAL: тело не восстановлено (0x180746AA0, StringBuilder-ключ + кэш _surfCache)
-		return 0f;
+		if (part == null || part.triangles == null)
+		{
+			return float.NegativeInfinity;
+		}
+		System.Text.StringBuilder stringBuilder = new System.Text.StringBuilder(keyPrefix ?? "");
+		for (int i = 0; i < 16; i++)
+		{
+			stringBuilder.Append(':');
+			stringBuilder.Append(BitConverter.SingleToInt32Bits(toBaker[i]).ToString("X8"));
+		}
+		stringBuilder.Append(':');
+		stringBuilder.Append(BitConverter.SingleToInt32Bits(rodRadiusM).ToString("X8"));
+		string text = stringBuilder.ToString();
+		lock (_surfCache)
+		{
+			if (_surfCache.TryGetValue(text, out var value))
+			{
+				return value;
+			}
+		}
+		Vector3[] array = new Vector3[part.vertices.Length];
+		for (int j = 0; j < part.vertices.Length; j++)
+		{
+			array[j] = toBaker.MultiplyPoint3x4(part.vertices[j]);
+		}
+		Vector2[] array2 = new Vector2[FanLines];
+		for (int k = 0; k < FanLines; k++)
+		{
+			array2[k] = FanPoint(k, rodRadiusM);
+		}
+		double num = double.NegativeInfinity;
+		int[] triangles = part.triangles;
+		for (int l = 0; l < triangles.Length; l += 3)
+		{
+			Vector3 vector = array[triangles[l]];
+			Vector3 vector2 = array[triangles[l + 1]];
+			Vector3 vector3 = array[triangles[l + 2]];
+			for (int m = 0; m < FanLines; m++)
+			{
+				Vector2 vector4 = array2[m];
+				double num2 = (double)(vector2.y - vector3.y) * (double)(vector.x - vector3.x) + (double)(vector3.x - vector2.x) * (double)(vector.y - vector3.y);
+				if (num2 == 0.0)
+				{
+					continue;
+				}
+				double num3 = ((double)(vector2.y - vector3.y) * (double)(vector4.x - vector3.x) + (double)(vector3.x - vector2.x) * (double)(vector4.y - vector3.y)) / num2;
+				double num4 = ((double)(vector3.y - vector.y) * (double)(vector4.x - vector3.x) + (double)(vector.x - vector3.x) * (double)(vector4.y - vector3.y)) / num2;
+				double num5 = 1.0 - num3 - num4;
+				if (num3 >= 0.0 && num4 >= 0.0 && num5 >= 0.0)
+				{
+					double num6 = num3 * (double)vector.z + num4 * (double)vector2.z + num5 * (double)vector3.z;
+					if (num6 > num)
+					{
+						num = num6;
+					}
+				}
+			}
+		}
+		float num7 = ((num == double.NegativeInfinity) ? float.NegativeInfinity : ((float)num));
+		lock (_surfCache)
+		{
+			if (_surfCache.Count > 256)
+			{
+				_surfCache.Clear();
+			}
+			_surfCache[text] = num7;
+		}
+		return num7;
 	}
 
 	public static void ShiftZ(ref SuperPlateSpec s, float dz)

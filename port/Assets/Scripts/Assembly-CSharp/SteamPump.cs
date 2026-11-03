@@ -1,3 +1,4 @@
+#if !UNITY_IOS && UNITY_STANDALONE_WIN
 using Steamworks;
 using UnityEngine;
 
@@ -18,3 +19,4 @@ public sealed class SteamPump : MonoBehaviour
 		SteamBoot.Down();
 	}
 }
+#endif

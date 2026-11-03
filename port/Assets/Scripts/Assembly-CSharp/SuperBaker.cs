@@ -1,17 +1,11 @@
-// PARTIAL: восстановлены TryMaterial, Material, SpacingCeilingFor, ResolveSpacing, AlongAxisForDepth,
+// DONE: восстановлены TryMaterial, Material, SpacingCeilingFor, ResolveSpacing, AlongAxisForDepth,
 // AlongAxisForFaceOnAxis, PlateCentre, FaceOnAxis, PlateFrame, IsFinite, RodVolume, PlateVolume,
 // ParticleBudgetOk, Baked.Dispose/Volume/RawVolume, RodTipForClearance, FarDepthM, RoundKeeps,
 // RoundCount, InsideMesh, обёртки Bake (все 4) и BakePlates, ValidatePose, FillPlate, FillPlatePosed,
 // FillRoundPosed, FillRod, FillProfile, FillJet, FillShell (полностью, 0x1806728A0), ShellBody,
-// CountRodInsidePlates, AssertNoOverlap, EstimateParticles.
-// НЕ восстановлены (оставлены заглушки, см. отчёт):
-// - AssignXi (0x180664610): цикл по телам (List<Body>.GetEnumerator), ComposeCount.get_Fresh,
-//   SuperXi.ScaleMultiplier(...)+SuperXi.Compose(...)+SuperXi.Measure(...), массив через SzArrayNew,
-//   CultureInfo.InvariantCulture в тексте; собирает xiCompose.
-// - BakeMeshBody (0x1806665B0): ValidatePose/Material/ResolveSpacing, SuperMeshCache.GetOrCompute
-//   (MeshFillCalls++), итерация ячеек SuperClip.CellCentre/CellLive, PackLatKey, List.Add*;
-//   выбрасывает InvalidOperationException с текстом (доступен в ISIL 1065-1088).
-// - главная Bake (0x180668090, 7636 строк ISIL) — проверенная структура (для следующего агента):
+// CountRodInsidePlates, AssertNoOverlap, EstimateParticles, AssignXi (0x180664610),
+// BakeMeshBody (0x1806665B0), главная Bake (0x180668090).
+// Структура главной Bake (0x180668090, 7636 строк ISIL):
 //   1) локальные списки: pos(r14), vel, mid, volScale, cellVol, pin(r12), nofrag(r13), bodies(rsi);
 //      latKey = new List<ulong>() ТОЛЬКО если SuperDamage.FailureStrainScatterOn и
 //      FailureStrainScatterModulus>0 (не NaN) — тогда lambda=SuperXi.Lambda(m,""), иначе latKey=null;
@@ -46,6 +40,7 @@
 // ABI подсказка: слоты параметров позиционные (int→rcx/rdx/r8/r9, float→xmm0..3, далее стек).
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
 public static class SuperBaker
@@ -435,20 +430,464 @@ public static class SuperBaker
 
 	private static Baked Bake(SuperRodSpec rod, SuperShellSpec shell, SuperJetSpec jet, IList<SuperPlateSpec> plates, float spacing, bool withRod, Proj kind)
 	{
-		// PARTIAL: тело не восстановлено (0x180668090)
-		return null;
+		bool scatterOn = SuperDamage.FailureStrainScatterOn;
+		double modulus = SuperDamage.FailureStrainScatterModulus;
+		bool scalingOn = SuperDamage.S43ScalingOn;
+		uint salt = SuperDamage.FailureStrainScatterSalt;
+		double lambda = 0.0;
+		if (scatterOn)
+		{
+			if (!(modulus > 0.0) || double.IsInfinity(modulus))
+			{
+				throw new InvalidOperationException(string.Format("[запекание] S32: ширина ξ не выбрана: -s32m (модуль Вейбулла m = {0}). Флаг разброса деформации ", modulus) + "разрушения ВКЛ (SuperDamage.FailureStrainScatterOn), а единственный параметр ширины не задан — правдоподобное число вместо него было бы подгонкой без объявления.");
+			}
+			lambda = SuperXi.Lambda(modulus, 0.1f);
+		}
+		double alpha = SuperDamage.S43Alpha;
+		double beta = SuperDamage.S43Beta;
+		double vRefM3 = 0.0;
+		double hRefM = 0.0;
+		if (scalingOn)
+		{
+			SuperDamage.S43Anchors(out vRefM3, out hRefM);
+		}
+		List<ulong> latKey = ((scatterOn || scalingOn) ? new List<ulong>() : null);
+		List<Vector3> pos = new List<Vector3>();
+		List<Vector3> vel = new List<Vector3>();
+		List<ContinuumMaterialId> mid = new List<ContinuumMaterialId>();
+		List<float> volScale = new List<float>();
+		List<float> cellVol = new List<float>();
+		List<byte> pin = new List<byte>();
+		List<byte> nofrag = new List<byte>();
+		List<Body> bodies = new List<Body>();
+		float rodSpacing = ResolveSpacing(rod.spacingM, spacing, "стержень");
+		float jetSpacing = ResolveSpacing(jet.spacingM, spacing, "струя");
+		SuperCavity cavity = default(SuperCavity);
+		int removed = 0;
+		double removedVolM3 = 0.0;
+		double solidVolM3 = 0.0;
+		double measuredFraction = 0.0;
+		if (withRod)
+		{
+			if (kind == Proj.Shell)
+			{
+				SuperRodSpec rod2 = default(SuperRodSpec);
+				rod2.diameterM = shell.diameterM;
+				rod2.lengthM = shell.lengthM;
+				rod2.velocityMps = shell.velocityMps;
+				rod2.nose = shell.nose;
+				rod2.tipZM = shell.tipZM;
+				float coreRad = shell.diameterM * 0.5f * Mathf.Clamp(shell.coreDiameterFrac, 0f, 1f);
+				float capLenM = shell.lengthM * shell.capLengthFrac;
+				int start = pos.Count;
+				ContinuumMaterialId mat = Material(shell.coreMaterial);
+				FillShell(rod2, spacing, ShellPart.Core, shell, coreRad, capLenM, pos, vel, mat, mid, volScale, cellVol, latKey);
+				bodies.Add(ShellBody(start, pos.Count, mat, "сердечник", shell, spacing));
+				if (shell.HasJacket)
+				{
+					start = pos.Count;
+					mat = Material(shell.jacketMaterial);
+					FillShell(rod2, spacing, ShellPart.Jacket, shell, coreRad, capLenM, pos, vel, mat, mid, volScale, cellVol, latKey);
+					bodies.Add(ShellBody(start, pos.Count, mat, "рубашка", shell, spacing));
+				}
+				if (shell.HasCap)
+				{
+					start = pos.Count;
+					mat = Material(shell.capMaterial);
+					FillShell(rod2, spacing, ShellPart.Cap, shell, coreRad, capLenM, pos, vel, mat, mid, volScale, cellVol, latKey);
+					bodies.Add(ShellBody(start, pos.Count, mat, "колпак", shell, spacing));
+				}
+				while (pin.Count < pos.Count)
+				{
+					pin.Add(0);
+				}
+				while (nofrag.Count < pos.Count)
+				{
+					nofrag.Add(0);
+				}
+			}
+			else if (kind == Proj.Jet)
+			{
+				int start = pos.Count;
+				ContinuumMaterialId mat = Material(jet.material);
+				FillJet(jet, jetSpacing, pos, vel, mat, mid, volScale, cellVol, latKey);
+				Body body = default(Body);
+				body.start = start;
+				body.count = pos.Count - start;
+				body.material = mat;
+				body.name = "струя";
+				body.normal = new Vector3(0f, 0f, -1f);
+				body.thicknessM = jet.lengthM;
+				body.faceCentre = new Vector3(0f, 0f, jet.tipZM);
+				body.spacingM = jetSpacing;
+				bodies.Add(body);
+				while (pin.Count < pos.Count)
+				{
+					pin.Add(0);
+				}
+				while (nofrag.Count < pos.Count)
+				{
+					nofrag.Add(0);
+				}
+			}
+			else
+			{
+				if (rod.cavityFraction > 0f && !SuperCavity.TryResolve(in rod, rodSpacing, out cavity, out string failKey, out object[] failArgs, out string prose))
+				{
+					throw new InvalidOperationException("[запекание] " + prose);
+				}
+				if (rod.hasProfile)
+				{
+					SuperShellProfile profile = rod.profile;
+					if (!profile.present)
+					{
+						throw new InvalidOperationException("[запекание] S41: у спецификации поднят признак профиля, а сам профиль пуст (present = false). Тело испеклось бы по прежним скалярам под именем «по профилю», и отличить это на экране было бы нечем.");
+					}
+					if (!profile.Validate(rodSpacing, out string failKey2, out object[] failArgs2, out string prose2))
+					{
+						throw new InvalidOperationException("[запекание] S41 [" + failKey2 + "] " + prose2);
+					}
+					if ((profile.cavity == SuperProfileCavity.VolumeFraction) != (rod.cavityFraction > 0f))
+					{
+						throw new InvalidOperationException(string.Format("[запекание] S41: профиль объявляет полость «{0}», а доля полости ", profile.cavity) + string.Format("спецификации — {0:F4}. Вид полости профиля и доля спецификации ", rod.cavityFraction) + "обязаны говорить одно: решение о полости принимает доля, и профиль, называющий её иначе, лгал бы в отчёте и в паспорте прогона, пекясь по-другому.");
+					}
+					if (cavity.present)
+					{
+						if (profile.LengthM != rod.lengthM || profile.diameterM != rod.diameterM)
+						{
+							throw new InvalidOperationException(string.Format("[запекание] S41: у полого тела габарит профиля {0:F3} × ", profile.LengthM * 1000f) + string.Format("{0:F3} мм разошёлся с габаритом спецификации ", profile.diameterM * 1000f) + string.Format("{0:F3} × {1:F3} мм. Полость разрешена по ", rod.lengthM * 1000f, rod.diameterM * 1000f) + "СПЕЦИФИКАЦИИ, а тело печётся по ПРОФИЛЮ — полость легла бы по чужой длине.");
+						}
+						float radius = rod.diameterM * 0.5f;
+						float noseLen = RodGeometry.NoseLengthM(rod.diameterM, rod.lengthM);
+						int nz = Math.Max(1, Mathf.RoundToInt(rod.lengthM / rodSpacing));
+						for (int i = 0; i < nz; i++)
+						{
+							float a = (i + 0.5f) * rodSpacing;
+							float num = RodGeometry.NoseRadiusFactorAt(rod.nose, a, noseLen, radius) * radius;
+							float num2 = profile.OuterRadiusAt(a);
+							if (num2 != num)
+							{
+								throw new InvalidOperationException(string.Format("[запекание] S41: у полого тела форма профиля разошлась со скалярной на слое {0} (станция {1:F3} мм): профиль даёт радиус {2:F3} мм, ", i, a * 1000f, num2 * 1000f) + string.Format("закон носа скаляров — {0:F3} мм. Полость задана ДОЛЕЙ ОБЪЁМА и ", num * 1000f) + "разрешена по скалярной форме; на своей форме она перерезала бы тело, а масса «сошлась» бы по кольцевой поправке. Своя форма полому телу ждёт вида полости «стенка слоями».");
+							}
+						}
+					}
+					int start = pos.Count;
+					int regionCount = profile.RegionCount;
+					List<int> regionCounts = new List<int>(regionCount);
+					List<ContinuumMaterialId> regionMats = new List<ContinuumMaterialId>(regionCount);
+					FillProfile(rod, rodSpacing, pos, vel, mid, volScale, cellVol, latKey, in cavity, regionCounts, regionMats, out removed, out removedVolM3, out solidVolM3);
+					if (cavity.present && (removed == 0 || solidVolM3 <= 0.0))
+					{
+						throw new InvalidOperationException("[запекание] S41: ПОЛОЕ ТЕЛО ПО ПРОФИЛЮ ИСПЕКЛОСЬ СПЛОШНЫМ: полость радиуса " + string.Format("{0:F2} мм на слоях {1}..{2} ", cavity.radiusM * 1000f, cavity.firstLayer, cavity.lastLayer) + string.Format("при шаге {0:F2} мм выбросила {1} частиц.", rodSpacing * 1000f, removed));
+					}
+					measuredFraction = (cavity.present ? (removedVolM3 / solidVolM3) : 0.0);
+					while (pin.Count < pos.Count)
+					{
+						pin.Add(0);
+					}
+					while (nofrag.Count < pos.Count)
+					{
+						nofrag.Add(0);
+					}
+					int num3 = start;
+					for (int j = 0; j < regionCounts.Count; j++)
+					{
+						int num4 = regionCounts[j];
+						if (num4 < 1)
+						{
+							throw new InvalidOperationException("[запекание] S41: область «" + profile.regions[j].name + "» профиля не получила ни одной " + string.Format("частицы при шаге {0:F2} мм. Тело с нулём частиц роняет ", rodSpacing * 1000f) + "знаменатель исхода и печатает правдоподобный вердикт ни о чём — это отказ, а не мелочь: мельчи шаг либо убери область из профиля.");
+						}
+						Body body2 = default(Body);
+						body2.start = num3;
+						body2.count = num4;
+						body2.material = regionMats[j];
+						body2.name = profile.regions[j].name;
+						body2.normal = new Vector3(0f, 0f, -1f);
+						body2.thicknessM = profile.LengthM;
+						body2.faceCentre = new Vector3(0f, 0f, rod.tipZM);
+						body2.spacingM = rodSpacing;
+						bodies.Add(body2);
+						num3 += num4;
+					}
+				}
+				else
+				{
+					int start = pos.Count;
+					ContinuumMaterialId mat = Material(rod.material);
+					FillRod(rod, rodSpacing, pos, vel, mat, mid, volScale, cellVol, latKey, in cavity, out removed, out removedVolM3, out solidVolM3);
+					if (cavity.present && (removed == 0 || solidVolM3 <= 0.0))
+					{
+						throw new InvalidOperationException("[запекание] ПОЛЫЙ КОРПУС ИСПЁКСЯ СПЛОШНЫМ: полость радиуса " + string.Format("{0:F2} мм на слоях {1}..{2} ", cavity.radiusM * 1000f, cavity.firstLayer, cavity.lastLayer) + string.Format("при шаге {0:F2} мм выбросила {1} частиц. Это не ", rodSpacing * 1000f, removed) + "мелочь: масса и объём сошлись бы, и «полый» корпус ушёл бы в счёт сплошным.");
+					}
+					measuredFraction = (cavity.present ? (removedVolM3 / solidVolM3) : 0.0);
+					while (pin.Count < pos.Count)
+					{
+						pin.Add(0);
+					}
+					while (nofrag.Count < pos.Count)
+					{
+						nofrag.Add(0);
+					}
+					Body body3 = default(Body);
+					body3.start = start;
+					body3.count = pos.Count - start;
+					body3.material = mat;
+					body3.name = "стержень";
+					body3.normal = new Vector3(0f, 0f, -1f);
+					body3.thicknessM = rod.lengthM;
+					body3.faceCentre = new Vector3(0f, 0f, rod.tipZM);
+					body3.spacingM = rodSpacing;
+					bodies.Add(body3);
+				}
+			}
+		}
+		int projectileBodyCount = bodies.Count;
+		for (int i = 0; i < plates.Count; i++)
+		{
+			SuperPlateSpec pl = plates[i];
+			if (pl.mesh == null)
+			{
+				string text = string.Format("плита {0}", i + 1);
+				if (pl.hasPose)
+				{
+					ValidatePose(in pl, text);
+				}
+				ContinuumMaterialId mat2 = Material(pl.material);
+				float num5 = ResolveSpacing(pl.spacingM, spacing, text);
+				if (pl.fineCoreRadiusM > 0f && num5 * 0.5f < spacing * 0.9999f)
+				{
+					throw new InvalidOperationException(string.Format("[запекание] плита {0}: мелкое ядро на шаге {1:F3} мм ", i + 1, num5 * 1000f) + string.Format("мельче шага сцены {0:F3} мм. Ядро имеет смысл только у плиты на ", spacing * 1000f) + string.Format("удвоенном шаге сцены (spacingM = {0:F3} мм): тогда снаружи одна ", spacing * 2f * 1000f) + "частица на ячейку, внутри восемь.");
+				}
+				int start = pos.Count;
+				Vector3 vector = FillPlate(pl, num5, pos, mid, mat2, pin, cellVol, latKey);
+				for (int j = start; j < pos.Count; j++)
+				{
+					vel.Add(Vector3.zero);
+					volScale.Add(1f);
+				}
+				if (nofrag != null)
+				{
+					while (nofrag.Count < pos.Count)
+					{
+						nofrag.Add((byte)(pl.noFragmentation ? 1 : 0));
+					}
+				}
+				PlateFrame(in pl, out Vector3 centre, out Vector3 u, out Vector3 v, out Vector3 n, out float halfU, out float halfV);
+				int num6 = 0;
+				if (pl.clip.present)
+				{
+					for (int k = start; k < pos.Count; k++)
+					{
+						if (pin[k] != 0 && pl.clip.Classify(pos[k], num5) == 1)
+						{
+							num6++;
+						}
+					}
+				}
+				Body body4 = default(Body);
+				body4.start = start;
+				body4.count = pos.Count - start;
+				body4.material = mat2;
+				body4.name = text;
+				body4.normal = vector;
+				body4.thicknessM = pl.thicknessM;
+				body4.faceCentre = centre + vector * (pl.thicknessM * 0.5f);
+				body4.centre = centre;
+				body4.axisU = u;
+				body4.axisV = v;
+				body4.halfSideM = (pl.hasPose ? MathF.Max(halfU, halfV) : (pl.sideM * 0.5f));
+				body4.halfUM = halfU;
+				body4.halfVM = halfV;
+				body4.noFragmentation = pl.noFragmentation;
+				body4.spacingM = num5;
+				body4.fineSpacingM = ((pl.fineCoreRadiusM > 0f) ? (num5 * 0.5f) : 0f);
+				body4.fineCoreRadiusM = pl.fineCoreRadiusM;
+				body4.clipAnchored = num6;
+				bodies.Add(body4);
+			}
+			else
+			{
+				bodies.Add(BakeMeshBody(pl, i, spacing, pos, vel, mid, volScale, cellVol, pin, nofrag, latKey));
+			}
+		}
+		bool flag2 = false;
+		for (int l = 0; l < bodies.Count; l++)
+		{
+			if (bodies[l].isMesh)
+			{
+				flag2 = true;
+				break;
+			}
+		}
+		if (flag2)
+		{
+			for (int m2 = projectileBodyCount; m2 < bodies.Count; m2++)
+			{
+				Body body5 = bodies[m2];
+				if (body5.isMesh)
+				{
+					continue;
+				}
+				int num7 = body5.start + body5.count;
+				for (int num8 = body5.start; num8 < num7; num8++)
+				{
+					for (int num9 = projectileBodyCount; num9 < bodies.Count; num9++)
+					{
+						Body body6 = bodies[num9];
+						if (body6.isMesh && InsideMesh(in body6, pos[num8]))
+						{
+							throw new InvalidOperationException("[запекание] S40: частица тела «" + body5.name + "» лежит в веществе части модели «" + body6.name + "» — два вещества в одном объёме не сцена. Отказ по имени ставит чтение сцены; сюда дошёл прямой вызов.");
+						}
+					}
+				}
+			}
+		}
+		if (latKey != null)
+		{
+			if (latKey.Count != pos.Count)
+			{
+				throw new InvalidOperationException(string.Format("[запекание] S32: ключей решётки ξ {0} при {1} частицах — заливка добавила частицу ", latKey.Count, pos.Count) + "мимо ключа (или ключ мимо частицы); ξ сел бы на чужую частицу молча.");
+			}
+			int num10 = 0;
+			for (int num11 = 0; num11 < bodies.Count; num11++)
+			{
+				Body body7 = bodies[num11];
+				if (body7.start != num10 || body7.start < 0)
+				{
+					throw new InvalidOperationException(string.Format("[запекание] S32: тело {0} «{1}» начинается с {2} (ждали {3}), ", num11, body7.name, body7.start, num10) + string.Format("частиц {0} — тела не покрывают набор подряд, номер тела ξ был бы не тем.", body7.count));
+				}
+				num10 += body7.count;
+			}
+			if (num10 != pos.Count)
+			{
+				throw new InvalidOperationException(string.Format("[запекание] S32: тела покрывают {0} частиц из {1} — у части частиц не было бы тела для ξ.", num10, pos.Count));
+			}
+		}
+		Baked baked = new Baked();
+		SuperParticles superParticles = new SuperParticles(pos.Count);
+		if (latKey == null && superParticles.xi.IsCreated)
+		{
+			superParticles.xi.Dispose();
+		}
+		baked.particles = superParticles;
+		baked.spacing = spacing;
+		baked.bodies = bodies;
+		baked.hasRod = withRod;
+		baked.projectileBodyCount = projectileBodyCount;
+		baked.cellVol = cellVol.ToArray();
+		baked.cavity = cavity;
+		baked.cavityRemoved = removed;
+		baked.cavityMeasuredFraction = measuredFraction;
+		for (int num12 = 0; num12 < pos.Count; num12++)
+		{
+			superParticles.x[num12] = pos[num12];
+			superParticles.v[num12] = vel[num12];
+			superParticles.C[num12] = SuperMat3.Zero;
+			superParticles.F[num12] = SuperMat3.Identity;
+			superParticles.s[num12] = SuperMat3.Zero;
+			superParticles.sigma[num12] = SuperMat3.Zero;
+			superParticles.epsP[num12] = 0f;
+			superParticles.epsRate[num12] = 0f;
+			superParticles.T[num12] = 298f;
+			superParticles.e[num12] = 0f;
+			superParticles.V0[num12] = volScale[num12] * baked.cellVol[num12];
+			superParticles.mass[num12] = superParticles.V0[num12] * ContinuumMaterials.Get(mid[num12]).rho0;
+			superParticles.matId[num12] = (byte)mid[num12];
+			superParticles.pinned[num12] = pin[num12];
+			superParticles.noFrag[num12] = nofrag[num12];
+		}
+		if (latKey != null)
+		{
+			AssignXi(baked, mid, latKey, salt, modulus, lambda, scatterOn, scalingOn, alpha, beta, vRefM3, hRefM);
+		}
+		if (OverlapGateEnabled && withRod)
+		{
+			AssertNoOverlap(baked);
+		}
+		return baked;
 	}
 
 	private static void AssignXi(Baked baked, List<ContinuumMaterialId> mid, List<ulong> latKey, uint salt, double m, double lambda, bool scatterOn, bool scalingOn, double alpha, double beta, double vRefM3, double hRefM)
 	{
-		// PARTIAL (0x180664610). Проверено по ISIL:
-		// ComposeCount[] compose = new ComposeCount[baked.bodies.Count];
-		// начальное значение — ComposeCount.get_Fresh() (48-байтный struct, поля на [rax], [rax+16], [rax+32]);
-		// цикл по телам (foreach baked.bodies, get_Item): для каждого i при latKey != null
-		//   ulong key = latKey[i]; double mult = SuperXi.ScaleMultiplier(key, vRef/hRef-параметры...);
-		//   иначе mult = 1; далее mid[i] (List.get_Item) и SuperXi.Compose(...) с параметрами
-		//   (salt, m, lambda, scatterOn, scalingOn, alpha, beta, vRefM3, hRefM) — 8 аргументов+;
-		// в конце SuperXi.Measure(...), CultureInfo.InvariantCulture, String.Concat для текста/проверки.
+		SuperXi.ComposeCount total = SuperXi.ComposeCount.Fresh;
+		int count = baked.bodies.Count;
+		SuperXi.ComposeCount[] compose = new SuperXi.ComposeCount[count];
+		for (int i = 0; i < count; i++)
+		{
+			Body body = baked.bodies[i];
+			SuperXi.ComposeCount c = SuperXi.ComposeCount.Fresh;
+			int end = body.start + body.count;
+			for (int j = body.start; j < end; j++)
+			{
+				double mult = 1.0;
+				if (scalingOn)
+				{
+					mult = SuperXi.ScaleMultiplier(baked.cellVol[j], alpha, beta, vRefM3, hRefM);
+				}
+				ContinuumMaterialId mat = mid[j];
+				ulong latKey2 = latKey[j];
+				baked.particles.xi[j] = SuperXi.Compose(scatterOn, scalingOn, salt, mat, i, latKey2, m, mult, ref c);
+			}
+			compose[i] = c;
+			total.n += c.n;
+			total.floorHits += c.floorHits;
+			total.ceilHits += c.ceilHits;
+			if (c.multMin < total.multMin)
+			{
+				total.multMin = c.multMin;
+			}
+			if (c.multMax > total.multMax)
+			{
+				total.multMax = c.multMax;
+			}
+		}
+		baked.xiCompose = total;
+		string text = "";
+		if (SuperDamage.SabotageXiUnity)
+		{
+			for (int i = 0; i < baked.particles.count; i++)
+			{
+				baked.particles.xi[i] = 1f;
+			}
+			text += "; ⛔ ДИВЕРСИЯ SabotageXiUnity: ξ ≡ 1";
+		}
+		if (SuperDamage.SabotageXiShuffle)
+		{
+			float[] array = baked.particles.xi.ToArray();
+			for (int i = 0; i < count; i++)
+			{
+				Body body = baked.bodies[i];
+				int num = body.count;
+				int start = body.start;
+				for (int j = start; j < start + num; j++)
+				{
+					int num2 = (num / 2 - start + j) % num + start;
+					baked.particles.xi[j] = array[num2];
+				}
+			}
+			text += "; ⛔ ДИВЕРСИЯ SabotageXiShuffle: ξ сдвинуты на полтела внутри каждого тела";
+		}
+		baked.xiModulus = (scatterOn ? m : 0.0);
+		baked.xiSalt = salt;
+		float[] array2 = baked.particles.xi.ToArray();
+		CultureInfo invariantCulture = CultureInfo.InvariantCulture;
+		if (!scalingOn)
+		{
+			SuperXi.Stats stats = SuperXi.Measure(array2, 0, baked.particles.count, m, false);
+			double num3 = ((baked.particles.count > 0) ? ((double)stats.clipped / (double)baked.particles.count) : 0.0);
+			Debug.Log(string.Format(invariantCulture, "[S32] поле ξ запекания: m = {0:G6}, λ = {1:F6}, n = {2}, среднее {3:F6}, CoV {4:F4} (аналитически {5:F4}), min {6:F4}, на полу {7} ({8:E2}; аналитически {9:E2}), реализация 0x{10:X8}, тел {11}{12}", m, lambda, stats.n, stats.mean, stats.cov, SuperXi.AnalyticCov(m), stats.min, stats.clipped, num3, SuperXi.ClippedShare(m), salt, count, text));
+			return;
+		}
+		for (int i = 0; i < count; i++)
+		{
+			Body body = baked.bodies[i];
+			SuperXi.Stats stats = SuperXi.Measure(array2, body.start, body.count, scatterOn ? m : 1.0, false);
+			SuperXi.ComposeCount c = compose[i];
+			Debug.Log(string.Format(invariantCulture, "[S43] поле ξ тела {0} «{1}»: n = {2}, среднее {3:F6}, CoV {4:F4}, min {5:F4}, max {6:F4}, множитель M [{7:G6}; {8:G6}], на полу {9}, на потолке {10}", i, body.name, stats.n, stats.mean, stats.cov, stats.min, stats.max, c.multMin, c.multMax, c.floorHits, c.ceilHits));
+		}
+		SuperXi.Stats stats2 = SuperXi.Measure(array2, 0, baked.particles.count, scatterOn ? m : 1.0, false);
+		string text2 = string.Format(invariantCulture, "[S43] поле ξ запекания: разброс {0}, m = {1:G6}, n = {2}, среднее {3:F6}, CoV {4:F4}, min {5:F4}, max {6:F4}, множитель M [{7:G6}; {8:G6}], потолок {9:G6}, реализация 0x{10:X8}, тел {11}{12}; ", scatterOn ? "ВКЛ" : "ВЫКЛ", m, stats2.n, stats2.mean, stats2.cov, stats2.min, stats2.max, total.multMin, total.multMax, 10f, salt, count, text);
+		Debug.Log(text2 + Localization.T("super.s43.note.passport", alpha.ToString("G6", invariantCulture), beta.ToString("G6", invariantCulture), SuperDamage.S43VRefMm3.ToString("G6", invariantCulture), SuperDamage.S43HRefMm.ToString("G6", invariantCulture), total.floorHits, total.ceilHits));
 	}
 
 	public static int CountRodInsidePlates(Baked b, out float deepestM, out int worstBody)
@@ -1114,19 +1553,89 @@ public static class SuperBaker
 
 	private static Body BakeMeshBody(SuperPlateSpec pl, int index, float sceneSpacing, List<Vector3> pos, List<Vector3> vel, List<ContinuumMaterialId> mid, List<float> volScale, List<float> cellVol, List<byte> pin, List<byte> nofrag, List<ulong> latKey)
 	{
-		// PARTIAL (0x1806665B0). Проверено по ISIL:
-		// string name = string.IsNullOrEmpty(pl.mesh.partName)
-		//     ? string.Format("часть {0}", pl.mesh.part + 1) : pl.mesh.partName;
-		// if (pl.hasPose && pl.clip.present) ValidatePose(in pl, name);
-		// ContinuumMaterialId mat = Material(pl.material);
-		// float spacing = ResolveSpacing(pl.spacingM, sceneSpacing, name);
-		// if (pl.mesh.spacing != spacing) → 1187 (ошибка);
-		// if (MathF.Abs(pl.clip.hu - pl.mesh.hu) > 0f || MathF.Abs(pl.clip.hv - pl.mesh.hv) > 0f) → 1161;
-		// vx = SuperMeshCache.GetOrCompute(pl.mesh); (MeshFillCalls++ где-то рядом)
-		// далее тройной цикл по ячейкам вокселей (Part.get_Count, bounds 1090/1092),
-		// SuperClip.CellCentre/CellLive, PackLatKey → latKey, List.Add* (mid, volScale, cellVol, pin),
-		// затем поля Body ([r12+4]=count, [r12+20]=...). Хвост: throw InvalidOperationException (1065-1088).
-		return default(Body);
+		string name = (string.IsNullOrEmpty(pl.mesh.partName) ? string.Format("часть {0}", pl.mesh.part + 1) : pl.mesh.partName);
+		if (!pl.hasPose || !pl.clip.present)
+		{
+			throw new InvalidOperationException("[запекание] S40: тело-модель «" + name + "» без позы или без области счёта — модель печётся только внутри области (ТЗ P2.3: модель без области счёта — отказ по имени у чтения сцены).");
+		}
+		ValidatePose(in pl, name);
+		ContinuumMaterialId mat = Material(pl.material);
+		float spacing = ResolveSpacing(pl.spacingM, sceneSpacing, name);
+		if (pl.mesh.spacing != spacing)
+		{
+			throw new InvalidOperationException(string.Format("[запекание] S40: тело-модель «{0}»: шаг тела {1:F4} мм ≠ шагу вокселизации {2:F4} мм ", name, spacing * 1000f, pl.mesh.spacing * 1000f) + "— решётка модели другой плотности под тем же описанием.");
+		}
+		if (MathF.Abs(pl.clip.hu - pl.mesh.hu) > 0f || MathF.Abs(pl.clip.hv - pl.mesh.hv) > 0f || MathF.Abs(pl.clip.hn - pl.mesh.hn) > 0f)
+		{
+			throw new InvalidOperationException("[запекание] S40: тело-модель «" + name + "»: полуразмеры области среза и вокселизации разошлись — ячейки легли бы не в ту коробку.");
+		}
+		SuperMeshVoxels vx = SuperMeshCache.GetOrCompute(pl.mesh);
+		if (pl.mesh.part < 0 || pl.mesh.part >= vx.parts.Length)
+		{
+			throw new InvalidOperationException(string.Format("[запекание] S40: тело-модель «{0}»: части {1} в модели нет ({2}).", name, pl.mesh.part, vx.parts.Length));
+		}
+		SuperMeshVoxels.Part part = vx.parts[pl.mesh.part];
+		if (part.Count == 0)
+		{
+			throw new InvalidOperationException("[запекание] S40: тело-модель «" + name + "» не дало ни одной ячейки в области — тело с нулём частиц роняет знаменатели приборов; чтение сцены обязано было его не выпускать.");
+		}
+		MeshFillCalls++;
+		float cell = spacing * spacing * spacing;
+		int start = pos.Count;
+		int anchored = 0;
+		int[] cells = part.cells;
+		for (int i = 0; i < cells.Length; i += 3)
+		{
+			int num2 = cells[i];
+			int num3 = cells[i + 1];
+			int num4 = cells[i + 2];
+			pos.Add(pl.clip.CellCentre(num2, num3, num4, spacing));
+			mid.Add(mat);
+			bool flag = pl.clip.CellLive(num2, num3, num4, spacing);
+			pin.Add((byte)(flag ? 0 : 1));
+			if (!flag)
+			{
+				anchored++;
+			}
+			cellVol.Add(cell);
+			if (latKey != null)
+			{
+				latKey.Add(SuperXi.PackLatKey(num2, num3, num4, 8));
+			}
+		}
+		for (int j = start; j < pos.Count; j++)
+		{
+			vel.Add(Vector3.zero);
+			volScale.Add(1f);
+		}
+		if (nofrag != null)
+		{
+			while (nofrag.Count < pos.Count)
+			{
+				nofrag.Add((byte)(pl.noFragmentation ? 1 : 0));
+			}
+		}
+		Body result = default(Body);
+		result.start = start;
+		result.count = pos.Count - start;
+		result.material = mat;
+		result.name = name;
+		result.normal = pl.clip.n;
+		result.thicknessM = pl.clip.hn * 2f;
+		result.faceCentre = pl.clip.centre + pl.clip.n * pl.clip.hn;
+		result.centre = pl.clip.centre;
+		result.axisU = pl.clip.u;
+		result.axisV = pl.clip.v;
+		result.halfSideM = MathF.Max(pl.clip.hu, pl.clip.hv);
+		result.halfUM = pl.clip.hu;
+		result.halfVM = pl.clip.hv;
+		result.noFragmentation = pl.noFragmentation;
+		result.spacingM = spacing;
+		result.isMesh = true;
+		result.meshVoxels = vx;
+		result.meshPart = pl.mesh.part;
+		result.clipAnchored = anchored;
+		return result;
 	}
 
 	public static bool InsideMesh(in Body b, Vector3 p)
