@@ -128,6 +128,20 @@ uint4 spvBitfieldInsert(uint4 Base, uint4 Insert, uint Offset, uint Count)
 }
 
 
+// groupshared scratch (must be global for Unity HLSL)
+groupshared uint g0_002[768];
+groupshared uint g1_002[768];
+groupshared uint g2_002[256];
+groupshared uint g0_003[768];
+groupshared uint g1_003[768];
+groupshared uint g2_003[256];
+groupshared uint g0_007[256];
+groupshared uint g0_008[256];
+groupshared uint g0_013[1];
+groupshared uint g0_014[1];
+groupshared uint g0_017[1];
+groupshared uint g0_018[1];
+
 [numthreads(256, 1, 1)]
 void KReconProbe(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
 {
@@ -240,9 +254,6 @@ void KReconSnap(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
 [numthreads(256, 1, 1)]
 void KReconBoundsP(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
 {
-    groupshared uint g0_002[768];
-    groupshared uint g1_002[768];
-    groupshared uint g2_002[256];
 
     float4 r0;
     r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
@@ -390,9 +401,6 @@ void KReconBoundsP(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_L
 [numthreads(256, 1, 1)]
 void KReconBoundsLevel(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
 {
-    groupshared uint g0_003[768];
-    groupshared uint g1_003[768];
-    groupshared uint g2_003[256];
 
     float4 r0;
     r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
@@ -584,7 +592,6 @@ void KReconSlotCount(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
 [numthreads(256, 1, 1)]
 void KReconScanBlocks(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
 {
-    groupshared uint g0_007[256];
 
     float4 r0;
     r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
@@ -637,7 +644,6 @@ void KReconScanBlocks(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 g
 [numthreads(256, 1, 1)]
 void KReconScanBlocksIP(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
 {
-    groupshared uint g0_008[256];
 
     float4 r0;
     r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
@@ -845,7 +851,6 @@ void KReconSortCells(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
 [numthreads(256, 1, 1)]
 void KReconKeyDiag(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
 {
-    groupshared uint g0_013[1];
 
     float4 r0;
     r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
@@ -959,7 +964,6 @@ void KReconKeyDiag(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_L
 [numthreads(256, 1, 1)]
 void KReconNodeDiag(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
 {
-    groupshared uint g0_014[1];
 
     float4 r0;
     r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
@@ -1096,7 +1100,6 @@ void KReconExtentClear(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
 [numthreads(256, 1, 1)]
 void KReconBlockSample(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
 {
-    groupshared uint g0_017[1];
 
     float4 r0;
     r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
@@ -1583,7 +1586,6 @@ void KReconBlockSample(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 
 [numthreads(256, 1, 1)]
 void KReconBlockDilate(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
 {
-    groupshared uint g0_018[1];
 
     float4 r0;
     r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
