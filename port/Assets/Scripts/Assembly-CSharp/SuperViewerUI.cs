@@ -1972,11 +1972,11 @@ public sealed class SuperViewerUI : MonoBehaviour
 	private void BuildLibrary(RectTransform root)
 	{
 		_libraryPanel = MenuTheme.MakeRect(root, "Library");
-		MenuTheme.Stretch(_libraryPanel, new Vector2(-120f, -40f), new Vector2(120f, 236f));
+		MenuTheme.Stretch(_libraryPanel, new Vector2(120f, 236f), new Vector2(-120f, -40f));
 		MenuTheme.AddImage(_libraryPanel, MenuTheme.Surface);
 		WheelZones.Register(_libraryPanel);
 		TextMeshProUGUI title = MenuTheme.MakeLabelRaw(_libraryPanel, "Title", Localization.T("super.viewer.library_title"), 26f, FontStyles.Bold, MenuTheme.TextPrimary, TextAlignmentOptions.Left);
-		MenuTheme.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(16f, -16f), new Vector2(420f, 24f));
+		MenuTheme.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -16f), new Vector2(420f, 34f));
 		_keyed.Add(new KeyedLabel
 		{
 			label = title,
@@ -1990,7 +1990,7 @@ public sealed class SuperViewerUI : MonoBehaviour
 				ShowLibrary(on: true);
 			}
 		}), 18f, TextAlignmentOptions.Center, 18f);
-		MenuTheme.Place((RectTransform)_tabGallery.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(200f, -14f), new Vector2(200f, 40f));
+		MenuTheme.Place((RectTransform)_tabGallery.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(470f, -14f), new Vector2(200f, 40f));
 		_tabMine = MenuTheme.MakeButtonRaw(_libraryPanel, "TabMine", Localization.T("super.gallery.tab_mine"), 40f, new UnityAction(delegate
 		{
 			if (_showGallery)
@@ -1999,7 +1999,7 @@ public sealed class SuperViewerUI : MonoBehaviour
 				ShowLibrary(on: true);
 			}
 		}), 18f, TextAlignmentOptions.Center, 18f);
-		MenuTheme.Place((RectTransform)_tabMine.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(686f, -14f), new Vector2(240f, 40f));
+		MenuTheme.Place((RectTransform)_tabMine.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(686f, -14f), new Vector2(240f, 40f));
 		_keyed.Add(new KeyedLabel
 		{
 			label = MenuTheme.LabelOf(_tabGallery),
@@ -2016,21 +2016,21 @@ public sealed class SuperViewerUI : MonoBehaviour
 		{
 			ShowLibrary(on: false);
 		}), 18f, TextAlignmentOptions.Center, 18f);
-		MenuTheme.Place((RectTransform)close.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(180f, -24f), new Vector2(180f, 40f));
+		MenuTheme.Place((RectTransform)close.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-24f, -14f), new Vector2(180f, 40f));
 		_keyed.Add(new KeyedLabel
 		{
 			label = MenuTheme.LabelOf(close),
 			key = "super.viewer.close"
 		});
 		_libStatus = MenuTheme.MakeLabelRaw(_libraryPanel, "Status", "", 14f, FontStyles.Normal, MenuTheme.TextMuted, TextAlignmentOptions.TopLeft);
-		MenuTheme.Place(_libStatus.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(38f, -78f), new Vector2(1630f, 24f));
+		MenuTheme.Place(_libStatus.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -78f), new Vector2(1630f, 38f));
 		_libStatus.textWrappingMode = TextWrappingModes.NoWrap;
 		_libStatus.overflowMode = TextOverflowModes.Ellipsis;
-		_compactAll = MenuTheme.MakeButtonRaw(_libraryPanel, "CompactAll", "", 40f, new UnityAction(OnCompactAllClicked), 18f, TextAlignmentOptions.Center, 18f);		MenuTheme.Place((RectTransform)_compactAll.transform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(946f, -14f), new Vector2(740f, 40f));
+		_compactAll = MenuTheme.MakeButtonRaw(_libraryPanel, "CompactAll", "", 40f, new UnityAction(OnCompactAllClicked), 18f, TextAlignmentOptions.Center, 18f);		MenuTheme.Place((RectTransform)_compactAll.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(946f, -14f), new Vector2(740f, 40f));
 		_compactAll.navigation = new Navigation();
 		_compactAll.gameObject.SetActive(false);
 		ScrollRect scrollRect = MenuTheme.MakeScrollList(_libraryPanel, "List", out var content);
-		MenuTheme.Stretch((RectTransform)scrollRect.transform, new Vector2(24f, -124f), new Vector2(-24f, -24f));
+		MenuTheme.Stretch((RectTransform)scrollRect.transform, new Vector2(24f, 24f), new Vector2(-24f, -124f));
 		_libViewport = scrollRect.viewport;
 		_libraryPanel.gameObject.SetActive(false);
 	}

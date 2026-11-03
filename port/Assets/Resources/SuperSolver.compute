@@ -8752,7 +8752,7 @@ void KBlockList_impl()
         r0.w = asfloat(asint(r0.z) + asint(r0.y));
         r0.w = asfloat(asint(r0.w) + (-1));
         uint _250 = asuint(r0.z);
-        r0.w = asfloat((_250 != 0u) ? (asuint(r0.w) / _250) : 4294967295u);
+        r0.w = asfloat((_250 != 0u) ? (asuint(r0.w) / max(_250, 1u)) : 4294967295u);
         r0.y = (asuint(r0.y) != 0u) ? r0.w : 1.4012984643248170709237295832899e-45f;
         _BlockArgs[0] = asuint(r0.z);
         _BlockArgs[1] = asuint(r0.y);

@@ -205,7 +205,7 @@ void KReconSnap(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
         r1.x = r1.z * 9.999999717180685365747194737196e-10f;
         r1.y = asfloat(_SolDmgR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
     }
-    int4 _367 = asint(int4(_RcMutField));
+    int4 _367 = asint(int4(_RcMutField, _RcMutField, _RcMutField, _RcMutField));
     bool4 _374 = bool4(_367.x == int4(1, 2, 3, 4).x, _367.y == int4(1, 2, 3, 4).y, _367.z == int4(1, 2, 3, 4).z, _367.w == int4(1, 2, 3, 4).w);
     r2 = asfloat(uint4(_374.x ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).x : uint4(0u, 0u, 0u, 0u).x, _374.y ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).y : uint4(0u, 0u, 0u, 0u).y, _374.z ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).z : uint4(0u, 0u, 0u, 0u).z, _374.w ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).w : uint4(0u, 0u, 0u, 0u).w));
     r1.z = r0.y * _RcMutScale;
@@ -217,9 +217,9 @@ void KReconSnap(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
     r1.z = r0.w * _RcMutScale;
     r1.z += _RcMutAdd;
     r0.w = (asuint(r2.z) != 0u) ? r1.z : r0.w;
-    float2 _458 = r1.xy * float2(_RcMutScale);
+    float2 _458 = r1.xy * float2(_RcMutScale, _RcMutScale);
     r1 = float4(r1.x, r1.y, _458.x, _458.y);
-    float2 _466 = r1.zw + float2(_RcMutAdd);
+    float2 _466 = r1.zw + float2(_RcMutAdd, _RcMutAdd);
     r1 = float4(r1.x, r1.y, _466.x, _466.y);
     r1.x = (asuint(r2.w) != 0u) ? r1.z : r1.x;
     r1.z = asfloat((asint(_RcMutField) == 5) ? 4294967295u : 0u);
@@ -227,7 +227,7 @@ void KReconSnap(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
     _RcPf[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
     r0.y = asfloat(asint(r0.x) + asint(_RcN));
     _RcPf[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z).x;
-    float2 _537 = asfloat(asint(int2(_RcN)) << int2(1, 2));
+    float2 _537 = asfloat(asint(int2(_RcN, _RcN)) << int2(1, 2));
     r0 = float4(r0.x, _537.x, _537.y, r0.w);
     float2 _547 = asfloat(asint(r0.xx) + asint(r0.yz));
     r0 = float4(r0.x, _547.x, _547.y, r0.w);
@@ -1066,7 +1066,7 @@ void KReconBlockClear(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
     _RcBlock[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
     r0.y = asfloat(asint(r0.x) + asint(_RcBlockTotal));
     _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
-    float2 _126 = asfloat(asint(int2(_RcBlockTotal)) << int2(1, 2));
+    float2 _126 = asfloat(asint(int2(_RcBlockTotal, _RcBlockTotal)) << int2(1, 2));
     r0 = float4(r0.x, _126.x, _126.y, r0.w);
     float2 _136 = asfloat(asint(r0.xx) + asint(r0.yz));
     r0 = float4(r0.x, _136.x, _136.y, r0.w);
@@ -1356,7 +1356,7 @@ void KReconBlockSample(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 
                     InterlockedMax(_RcExtent[(uint(asint(r5.w)) * 1u) + (uint(asint(r5.y)) >> 2u)], asuint(r0.z), _1323);
                 }
                 r0.z = asfloat((asint(_RcMutTap) != 0) ? 4294967295u : 0u);
-                float2 _1340 = asfloat(asint(int2(_RcN)) << int2(1, 2));
+                float2 _1340 = asfloat(asint(int2(_RcN, _RcN)) << int2(1, 2));
                 r3 = float4(r3.x, _1340.x, _1340.y, r3.w);
                 r5 = 0.0f.xxxx;
                 r0.w = 0.0f;
@@ -1556,7 +1556,7 @@ void KReconBlockSample(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 
                 _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x).x;
                 r0.w = asfloat(asint(r0.y) + asint(_RcBlockTotal));
                 _RcBlock[(uint(asint(r0.w)) * 1u) + (uint(0) >> 2u)] = asuint(r1.y).x;
-                float2 _2288 = asfloat(asint(int2(_RcBlockTotal)) << int2(1, 2));
+                float2 _2288 = asfloat(asint(int2(_RcBlockTotal, _RcBlockTotal)) << int2(1, 2));
                 r1 = float4(_2288.x, _2288.y, r1.z, r1.w);
                 float2 _2298 = asfloat(asint(r0.yy) + asint(r1.xy));
                 r1 = float4(_2298.x, _2298.y, r1.z, r1.w);
@@ -1682,10 +1682,10 @@ void KReconBlockDilate(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 
                 r1.x = asfloat(asint(r1.y) + asint(r2.w));
                 r2.y = asfloat(min(asint(r1.x), asint(r6.z)));
                 r6.w = 0.0f;
-                uint4 _662 = asuint(int4(_RcWholeWindow));
+                uint4 _662 = asuint(int4(_RcWholeWindow, _RcWholeWindow, _RcWholeWindow, _RcWholeWindow));
                 bool4 _668 = bool4(_662.x != uint4(0u, 0u, 0u, 0u).x, _662.y != uint4(0u, 0u, 0u, 0u).y, _662.z != uint4(0u, 0u, 0u, 0u).z, _662.w != uint4(0u, 0u, 0u, 0u).w);
                 r1 = float4(_668.x ? r6.wxwy.x : r4.x, _668.y ? r6.wxwy.y : r4.y, _668.z ? r6.wxwy.z : r4.z, _668.w ? r6.wxwy.w : r4.w);
-                uint2 _673 = asuint(int2(_RcWholeWindow));
+                uint2 _673 = asuint(int2(_RcWholeWindow, _RcWholeWindow));
                 bool2 _678 = bool2(_673.x != uint2(0u, 0u).x, _673.y != uint2(0u, 0u).y);
                 float2 _679 = float2(_678.x ? r6.wz.x : r2.xy.x, _678.y ? r6.wz.y : r2.xy.y);
                 r2 = float4(_679.x, _679.y, r2.z, r2.w);
@@ -1710,7 +1710,7 @@ void KReconBlockDilate(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 
                 r1.x = asfloat(asuint(r1.y) & asuint(r1.x));
                 if (asuint(r1.x) != 0u)
                 {
-                    float2 _798 = asfloat(asint(int2(_RcBlockTotal)) << int2(1, 2));
+                    float2 _798 = asfloat(asint(int2(_RcBlockTotal, _RcBlockTotal)) << int2(1, 2));
                     r1 = float4(_798.x, _798.y, r1.z, r1.w);
                     r1 = float4(r1.x, r1.y, 0.0f.xx.x, 0.0f.xx.y);
                     r2 = 0.0f.xxxx;
@@ -1852,7 +1852,7 @@ void KReconVertexFields(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
     float3 _231 = asfloat(min(asint(r4.xyz), asint(r1.xyz)));
     r1 = float4(_231.x, _231.y, _231.z, r1.w);
     r0.w = asfloat((asint(_RcMutTap) != 0) ? 4294967295u : 0u);
-    float2 _252 = asfloat(asint(int2(_RcN)) << int2(1, 2));
+    float2 _252 = asfloat(asint(int2(_RcN, _RcN)) << int2(1, 2));
     r4 = float4(_252.x, _252.y, r4.z, r4.w);
     float4 r5 = 0.0f.xxxx;
     r3.w = 0.0f;
@@ -2049,7 +2049,7 @@ void KReconVertexFields(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
     _RcVField[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x).x;
     r0.z = asfloat(asint(r0.x) + asint(_RcVertCount));
     _RcVField[(uint(asint(r0.z)) * 1u) + (uint(0) >> 2u)] = asuint(r1.y).x;
-    float2 _1126 = asfloat(asint(int2(_RcVertCount)) << int2(1, 2));
+    float2 _1126 = asfloat(asint(int2(_RcVertCount, _RcVertCount)) << int2(1, 2));
     r0 = float4(r0.x, r0.y, _1126.x, _1126.y);
     float2 _1136 = asfloat(asint(r0.xx) + asint(r0.zw));
     r0 = float4(r0.x, r0.y, _1136.x, _1136.y);

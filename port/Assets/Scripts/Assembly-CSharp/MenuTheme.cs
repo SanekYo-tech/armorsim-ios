@@ -247,7 +247,7 @@ public static class MenuTheme
 		accentImage.color = Line;
 		accentImage.raycastTarget = false;
 		label = MakeLabelRaw(rect, "Label", "", fontSize, FontStyles.Bold, TextPrimary, align);
-		Stretch(label.rectTransform, new Vector2(-leftPadding, -height * 0.26f), new Vector2(leftPadding, height * 0.26f));
+		Stretch(label.rectTransform, new Vector2(leftPadding, height * 0.26f), new Vector2(-leftPadding, -height * 0.26f));
 		label.characterSpacing = 4f;
 		label.enableAutoSizing = true;
 		label.fontSizeMin = fontSize * 0.62f;

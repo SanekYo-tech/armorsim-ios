@@ -864,7 +864,7 @@ public class MainMenuUI : MonoBehaviour
 		RectTransform line = MenuTheme.MakeRect(panel, "HeaderLine");
 		line.anchorMin = new Vector2(0f, 1f);
 		line.anchorMax = new Vector2(1f, 1f);
-		line.pivot = new Vector2(0f, 0.5f);
+		line.pivot = new Vector2(0.5f, 1f);
 		line.anchoredPosition = new Vector2(0f, -96f);
 		line.sizeDelta = new Vector2(-80f, 1f);
 		MenuTheme.AddImage(line, MenuTheme.Line);
@@ -975,7 +975,7 @@ public class MainMenuUI : MonoBehaviour
 			rect.anchoredPosition += new Vector2(0f, 58f);
 		}
 		Button start = MenuTheme.MakeButton(body, "BtnStart", "new.start", 56f, StartSimulation, 22f, TextAlignmentOptions.Center, 12f);
-		MenuTheme.Place(start.transform as RectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, new Vector2(320f, 56f));
+		MenuTheme.Place(start.transform as RectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(320f, 56f));
 		RefreshModeCards();
 	}
 
@@ -1922,7 +1922,7 @@ public class MainMenuUI : MonoBehaviour
 		SaveEntry captured = entry;
 		Button load = MenuTheme.MakeButton(row, "BtnLoad", "saves.load", 40f, delegate { PerformSaveLoad(captured); }, 16f, TextAlignmentOptions.Center, 10f);
 		load.interactable = action != SaveLoadAction.Refuse;
-		MenuTheme.Place(load.transform as RectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(entry.isPreset ? -20f : -170f, 0f), new Vector2(150f, 40f));
+		MenuTheme.Place(load.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(entry.isPreset ? -20f : -170f, 0f), new Vector2(150f, 40f));
 		if (reasonKey != null)
 		{
 			TextMeshProUGUI reason = MenuTheme.MakeLabel(row, "LoadReason", reasonKey, 14f, FontStyles.Normal, MenuTheme.TextLocked, TextAlignmentOptions.Left);
@@ -1937,9 +1937,9 @@ public class MainMenuUI : MonoBehaviour
 			SaveSystem.Delete(captured.id);
 			RefreshSavesList();
 		}, 16f, TextAlignmentOptions.Center, 10f);
-		MenuTheme.Place(delete.transform as RectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-20f, 0f), new Vector2(140f, 40f));
+		MenuTheme.Place(delete.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-20f, 0f), new Vector2(140f, 40f));
 		Button publish = MenuTheme.MakeButton(row, "BtnPublish", "workshop.publish", 40f, delegate { PerformPublish(captured); }, 16f, TextAlignmentOptions.Center, 10f);
-		MenuTheme.Place(publish.transform as RectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-330f, 0f), new Vector2(170f, 40f));
+		MenuTheme.Place(publish.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-330f, 0f), new Vector2(170f, 40f));
 		return row;
 	}
 
@@ -2151,13 +2151,13 @@ public class MainMenuUI : MonoBehaviour
 		WorkshopItem captured = item;
 		Button load = MenuTheme.MakeButton(row, "BtnLoad", "saves.load", 40f, delegate { PerformWorkshopLoad(captured); }, 16f, TextAlignmentOptions.Center, 10f);
 		load.interactable = importAction == WorkshopImportAction.Import && loadAction != SaveLoadAction.Refuse;
-		MenuTheme.Place(load.transform as RectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-410f, 0f), new Vector2(150f, 40f));
+		MenuTheme.Place(load.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-410f, 0f), new Vector2(150f, 40f));
 		Button import = MenuTheme.MakeButton(row, "BtnImport", "workshop.import", 40f, delegate { PerformWorkshopImport(captured); }, 16f, TextAlignmentOptions.Center, 10f);
 		import.interactable = importAction == WorkshopImportAction.Import;
-		MenuTheme.Place(import.transform as RectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-170f, 0f), new Vector2(230f, 40f));
+		MenuTheme.Place(import.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-170f, 0f), new Vector2(230f, 40f));
 		Button page = MenuTheme.MakeButton(row, "BtnPage", "workshop.page", 40f, delegate { WorkshopService.Backend.OpenItemPage(captured.publishedFileId); }, 16f, TextAlignmentOptions.Center, 10f);
 		page.interactable = !string.IsNullOrEmpty(item.publishedFileId);
-		MenuTheme.Place(page.transform as RectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-20f, 0f), new Vector2(140f, 40f));
+		MenuTheme.Place(page.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-20f, 0f), new Vector2(140f, 40f));
 		return row;
 	}
 
