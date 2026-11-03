@@ -382,14 +382,18 @@ public class MainMenuUI : MonoBehaviour
 		}
 		foreach (ControlBindings.KeyEntry entry in entries)
 		{
-			ControlAction captured = entry.action;
-			RectTransform row = MakeRow(column, entry.titleKey, entry.hintKey);
-			Button btn = MenuTheme.MakeButtonRaw(row, "Key_" + captured, string.Empty, 46f, delegate
+			ControlBindings.KeyEntry capturedEntry = entry;
+			Guard("строку управления " + capturedEntry.titleKey, delegate
 			{
-				BeginCapture(captured, scope);
-			}, 17f, TextAlignmentOptions.Center, 10f);
-			MenuTheme.Place(btn.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(RowValueWidth, 46f));
-			_keyRows.Add(new KeyRow { action = captured, btn = btn });
+				ControlAction captured = capturedEntry.action;
+				RectTransform row = MakeRow(column, capturedEntry.titleKey, capturedEntry.hintKey);
+				Button btn = MenuTheme.MakeButtonRaw(row, "Key_" + captured, string.Empty, 46f, delegate
+				{
+					BeginCapture(captured, scope);
+				}, 17f, TextAlignmentOptions.Center, 10f);
+				MenuTheme.Place(btn.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(RowValueWidth, 46f));
+				_keyRows.Add(new KeyRow { action = captured, btn = btn });
+			});
 		}
 	}
 
@@ -411,20 +415,24 @@ public class MainMenuUI : MonoBehaviour
 		MakeSectionLabel(column, "controls.mods");
 		foreach (ControlBindings.ModEntry entry in entries)
 		{
-			ControlModifier captured = entry.id;
-			RectTransform row = MakeRow(column, entry.titleKey, entry.hintKey);
-			Button[] btns = new Button[ControlBindings.AllModifierKinds.Length];
-			for (int i = 0; i < ControlBindings.AllModifierKinds.Length; i++)
+			ControlBindings.ModEntry capturedEntry = entry;
+			Guard("строку модификаторов " + capturedEntry.titleKey, delegate
 			{
-				ModifierKind kind = ControlBindings.AllModifierKinds[i];
-				Button btn = MenuTheme.MakeButtonRaw(row, "Mod_" + captured + "_" + kind, ControlBindings.ModifierName(kind), 46f, delegate
+				ControlModifier captured = capturedEntry.id;
+				RectTransform row = MakeRow(column, capturedEntry.titleKey, capturedEntry.hintKey);
+				Button[] btns = new Button[ControlBindings.AllModifierKinds.Length];
+				for (int i = 0; i < ControlBindings.AllModifierKinds.Length; i++)
 				{
-					AssignModifier(captured, kind, scope);
-				}, 16f, TextAlignmentOptions.Center, 10f);
-				MenuTheme.Place(btn.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2((i - ControlBindings.AllModifierKinds.Length + 1) * 106f, 0f), new Vector2(100f, 46f));
-				btns[i] = btn;
-			}
-			_modRows.Add(new ModRow { id = captured, btns = btns });
+					ModifierKind kind = ControlBindings.AllModifierKinds[i];
+					Button btn = MenuTheme.MakeButtonRaw(row, "Mod_" + captured + "_" + kind, ControlBindings.ModifierName(kind), 46f, delegate
+					{
+						AssignModifier(captured, kind, scope);
+					}, 16f, TextAlignmentOptions.Center, 10f);
+					MenuTheme.Place(btn.transform as RectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2((i - ControlBindings.AllModifierKinds.Length + 1) * 106f, 0f), new Vector2(100f, 46f));
+					btns[i] = btn;
+				}
+				_modRows.Add(new ModRow { id = captured, btns = btns });
+			});
 		}
 	}
 
@@ -497,10 +505,14 @@ public class MainMenuUI : MonoBehaviour
 		MakeNoteRow(column, "controls.fixed_hint");
 		foreach (ControlBindings.GestureEntry entry in entries)
 		{
-			RectTransform row = MakeRow(column, entry.titleKey, null);
-			TextMeshProUGUI value = MenuTheme.MakeLabelRaw(row, "Value", string.Empty, 16f, FontStyles.Normal, MenuTheme.TextMuted, TextAlignmentOptions.Right);
-			MenuTheme.Place(value.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(320f, 40f));
-			_gestureRows.Add(new GestureRow { entry = entry, value = value });
+			ControlBindings.GestureEntry capturedEntry = entry;
+			Guard("строку жестов " + capturedEntry.titleKey, delegate
+			{
+				RectTransform row = MakeRow(column, capturedEntry.titleKey, null);
+				TextMeshProUGUI value = MenuTheme.MakeLabelRaw(row, "Value", string.Empty, 16f, FontStyles.Normal, MenuTheme.TextMuted, TextAlignmentOptions.Right);
+				MenuTheme.Place(value.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(320f, 40f));
+				_gestureRows.Add(new GestureRow { entry = capturedEntry, value = value });
+			});
 		}
 	}
 
@@ -698,13 +710,13 @@ public class MainMenuUI : MonoBehaviour
 		MusicPlayer.EnsureIn(transform, MusicPolicy.MenuProgram(MusicSession.WasInGame));
 		BuildCanvas();
 		BuildHome();
-		BuildNewSimulationPanel();
-		BuildFlatAlphaPanel();
-		BuildSavesPanel();
-		BuildWorkshopPanel();
-		BuildAboutPanel();
-		BuildSettingsPanel();
-		BuildControlsPanels();
+		Guard("панель «Новая симуляция»", BuildNewSimulationPanel);
+		Guard("панель «Плоскость»", BuildFlatAlphaPanel);
+		Guard("панель «Сохранения»", BuildSavesPanel);
+		Guard("панель «Мастерская»", BuildWorkshopPanel);
+		Guard("панель «Об игре»", BuildAboutPanel);
+		Guard("панель «Настройки»", BuildSettingsPanel);
+		Guard("панели «Управление»", BuildControlsPanels);
 		ShowPanel(null);
 		Localization.OnLanguageChanged += OnLanguageChanged;
 		WorkshopService.Backend.ItemsChanged += OnWorkshopItemsChanged;
@@ -890,6 +902,52 @@ public class MainMenuUI : MonoBehaviour
 				item.SetActive(item == panel);
 			}
 		}
+		if (panel != null)
+		{
+			RebuildPanelLayout(panel);
+		}
+	}
+
+	private static void RebuildPanelLayout(GameObject panel)
+	{
+		RectTransform rect = panel.transform as RectTransform;
+		if (rect == null)
+		{
+			return;
+		}
+		Canvas.ForceUpdateCanvases();
+		LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
+		ScrollRect[] scrolls = panel.GetComponentsInChildren<ScrollRect>(true);
+		for (int i = 0; i < scrolls.Length; i++)
+		{
+			MenuTheme.RefreshScrollLayout(scrolls[i], panel.name + "/" + scrolls[i].name);
+		}
+	}
+
+	private static void Guard(string what, Action action)
+	{
+		if (action == null)
+		{
+			return;
+		}
+		try
+		{
+			action();
+		}
+		catch (Exception ex)
+		{
+			Debug.LogError("[MainMenuUI] не удалось построить " + what + " — продолжаю без него. " + ex);
+		}
+	}
+
+	private static void RefreshActiveListLayout(RectTransform content, string tag)
+	{
+		if (content == null || !content.gameObject.activeInHierarchy)
+		{
+			return;
+		}
+		ScrollRect scroll = content.GetComponentInParent<ScrollRect>();
+		MenuTheme.RefreshScrollLayout(scroll, tag);
 	}
 
 	private void ShowHome()
@@ -956,16 +1014,31 @@ public class MainMenuUI : MonoBehaviour
 		for (int i = 0; i < GameSettings.AllModes.Length; i++)
 		{
 			SimMode mode = GameSettings.AllModes[i];
-			_modeCards[mode] = MakeModeCard(modes, mode);
+			Guard("карточку режима " + mode, delegate
+			{
+				_modeCards[mode] = MakeModeCard(modes, mode);
+			});
 		}
-		_flatCard = MakeFlatCard(modes);
-		_bodyCard = MakeBodyCard(modes);
+		Guard("карточку «Плоскость»", delegate
+		{
+			_flatCard = MakeFlatCard(modes);
+		});
+		Guard("карточку BODY", delegate
+		{
+			_bodyCard = MakeBodyCard(modes);
+		});
 		TextMeshProUGUI aeroSection = MenuTheme.MakeLabel(modes, "AeroSection", "aero.section", 20f, FontStyles.Bold, MenuTheme.TextPrimary, TextAlignmentOptions.TopLeft);
 		LayoutElement sectionLayout = aeroSection.gameObject.AddComponent<LayoutElement>();
 		sectionLayout.minHeight = 28f;
 		sectionLayout.preferredHeight = 28f;
-		_aeroCard = MakeAeroCard(modes);
-		_radarCard = MakeRadarCard(modes);
+		Guard("карточку Aero", delegate
+		{
+			_aeroCard = MakeAeroCard(modes);
+		});
+		Guard("карточку Radar", delegate
+		{
+			_radarCard = MakeRadarCard(modes);
+		});
 		aeroScroll.Configure(scroll);
 		ApplyUltraVisibility();
 		Button ultra;
@@ -1828,12 +1901,15 @@ public class MainMenuUI : MonoBehaviour
 			LayoutElement layout = empty.gameObject.AddComponent<LayoutElement>();
 			layout.minHeight = 60f;
 			layout.preferredHeight = 60f;
+			RefreshActiveListLayout(_savesContent, "MainMenu.Saves");
 			return;
 		}
 		foreach (SaveEntry entry in saves)
 		{
-			MakeSaveRow(entry);
+			SaveEntry captured = entry;
+			Guard("строку сохранения «" + captured.displayName + "»", delegate { MakeSaveRow(captured); });
 		}
+		RefreshActiveListLayout(_savesContent, "MainMenu.Saves");
 	}
 
 	internal static SaveLoadAction DecideSaveLoad(SimFamily family, FlatFacts facts, out string reasonKey)
@@ -2100,13 +2176,16 @@ public class MainMenuUI : MonoBehaviour
 			LayoutElement layout = empty.gameObject.AddComponent<LayoutElement>();
 			layout.minHeight = 80f;
 			layout.preferredHeight = 80f;
+			RefreshActiveListLayout(_workshopContent, "MainMenu.Workshop");
 			return;
 		}
 		FlatFacts facts = ReadFlatFacts();
 		foreach (WorkshopItem item in _workshopItems)
 		{
-			MakeWorkshopRow(_workshopContent, item, facts);
+			WorkshopItem captured = item;
+			Guard("строку мастерской «" + captured.Title + "»", delegate { MakeWorkshopRow(_workshopContent, captured, facts); });
 		}
+		RefreshActiveListLayout(_workshopContent, "MainMenu.Workshop");
 	}
 
 	internal RectTransform MakeWorkshopRow(Transform parent, WorkshopItem item, FlatFacts facts)
@@ -2263,9 +2342,12 @@ public class MainMenuUI : MonoBehaviour
 					nativeName = captured.ToString();
 					break;
 			}
-			Button button = MenuTheme.MakeButtonRaw(langRow, "Lang_" + captured, nativeName, 54f, delegate { Localization.SetLanguage(captured); }, 19f, TextAlignmentOptions.Center, 10f);
-			button.gameObject.AddComponent<LayoutElement>().preferredWidth = 200f;
-			_langButtons[captured] = button;
+			Guard("кнопку языка " + captured, delegate
+			{
+				Button button = MenuTheme.MakeButtonRaw(langRow, "Lang_" + captured, nativeName, 54f, delegate { Localization.SetLanguage(captured); }, 19f, TextAlignmentOptions.Center, 10f);
+				button.gameObject.AddComponent<LayoutElement>().preferredWidth = 200f;
+				_langButtons[captured] = button;
+			});
 		}
 		TextMeshProUGUI modeLabel = MenuTheme.MakeLabel(rows, "ModeLabel", "settings.default_mode", 20f, FontStyles.Bold, MenuTheme.TextPrimary, TextAlignmentOptions.TopLeft);
 		MenuTheme.Place(modeLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, -130f), new Vector2(900f, 28f));
@@ -2282,17 +2364,20 @@ public class MainMenuUI : MonoBehaviour
 		for (int i = 0; i < GameSettings.AllModes.Length; i++)
 		{
 			SimMode captured = GameSettings.AllModes[i];
-			Button button = MenuTheme.MakeButton(modeRow, "Default_" + captured, GameSettings.TitleKey(captured), 52f, delegate
+			Guard("кнопку режима по умолчанию " + captured, delegate
 			{
-				GameSettings.SetDefaultMode(captured);
-				RefreshDefaultModeButtons();
-			}, 17f, TextAlignmentOptions.Center, 10f);
-			button.gameObject.AddComponent<LayoutElement>().preferredWidth = 260f;
-			if (!GameSettings.IsUnlocked(captured))
-			{
-				MenuTheme.SetLocked(button, true, null);
-			}
-			_defaultModeButtons[captured] = button;
+				Button button = MenuTheme.MakeButton(modeRow, "Default_" + captured, GameSettings.TitleKey(captured), 52f, delegate
+				{
+					GameSettings.SetDefaultMode(captured);
+					RefreshDefaultModeButtons();
+				}, 17f, TextAlignmentOptions.Center, 10f);
+				button.gameObject.AddComponent<LayoutElement>().preferredWidth = 260f;
+				if (!GameSettings.IsUnlocked(captured))
+				{
+					MenuTheme.SetLocked(button, true, null);
+				}
+				_defaultModeButtons[captured] = button;
+			});
 		}
 		ApplyUltraVisibility();
 		TextMeshProUGUI displayLabel = MenuTheme.MakeLabel(rows, "DisplayLabel", "settings.display", 20f, FontStyles.Bold, MenuTheme.TextPrimary, TextAlignmentOptions.TopLeft);
@@ -2301,19 +2386,19 @@ public class MainMenuUI : MonoBehaviour
 		TextMeshProUGUI displayHint = MenuTheme.MakeLabel(rows, "DisplayHint", "settings.display_hint", 16f, FontStyles.Normal, MenuTheme.TextMuted, TextAlignmentOptions.TopLeft);
 		MenuTheme.Place(displayHint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, -308f), new Vector2(1100f, 24f));
 		_toggleRows.Clear();
-		MakeToggleRow(rows, "ResultTint", "settings.result_tint", "settings.result_tint_hint", -344f, () => GameSettings.ResultTint, GameSettings.SetResultTint);
-		MakeToggleRow(rows, "TracePath", "settings.trace_path", "settings.trace_path_hint", -408f, () => GameSettings.TracePath, GameSettings.SetTracePath);
-		MakeToggleRow(rows, "Textures", "settings.textures", "settings.textures_hint", -472f, () => GameSettings.Textures, GameSettings.SetTextures);
-		MakeToggleRow(rows, "CrewOrgans", "organs", "organs_hint", -536f, () => GameSettings.CrewOrgans, GameSettings.SetCrewOrgans, true);
-		MakeToggleRow(rows, "CrewDamageHighlight", "highlight_title", "highlight_hint", -600f, () => GameSettings.CrewDamageHighlight, GameSettings.SetCrewDamageHighlight, true);
+		Guard("переключатель ResultTint", delegate { MakeToggleRow(rows, "ResultTint", "settings.result_tint", "settings.result_tint_hint", -344f, () => GameSettings.ResultTint, GameSettings.SetResultTint); });
+		Guard("переключатель TracePath", delegate { MakeToggleRow(rows, "TracePath", "settings.trace_path", "settings.trace_path_hint", -408f, () => GameSettings.TracePath, GameSettings.SetTracePath); });
+		Guard("переключатель Textures", delegate { MakeToggleRow(rows, "Textures", "settings.textures", "settings.textures_hint", -472f, () => GameSettings.Textures, GameSettings.SetTextures); });
+		Guard("переключатель CrewOrgans", delegate { MakeToggleRow(rows, "CrewOrgans", "organs", "organs_hint", -536f, () => GameSettings.CrewOrgans, GameSettings.SetCrewOrgans, true); });
+		Guard("переключатель CrewDamageHighlight", delegate { MakeToggleRow(rows, "CrewDamageHighlight", "highlight_title", "highlight_hint", -600f, () => GameSettings.CrewDamageHighlight, GameSettings.SetCrewDamageHighlight, true); });
 		TextMeshProUGUI limitsLabel = MenuTheme.MakeLabel(rows, "LimitsLabel", "settings.limits", 20f, FontStyles.Bold, MenuTheme.TextPrimary, TextAlignmentOptions.TopLeft);
 		MenuTheme.Place(limitsLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, -664f), new Vector2(900f, 28f));
 		limitsLabel.characterSpacing = 4f;
-		MakeToggleRow(rows, "ExtremeTilt", "settings.extreme_tilt", "settings.extreme_tilt_hint", -706f, () => GameSettings.AllowExtremeTilt, GameSettings.SetAllowExtremeTilt);
+		Guard("переключатель ExtremeTilt", delegate { MakeToggleRow(rows, "ExtremeTilt", "settings.extreme_tilt", "settings.extreme_tilt_hint", -706f, () => GameSettings.AllowExtremeTilt, GameSettings.SetAllowExtremeTilt); });
 		TextMeshProUGUI soundLabel = MenuTheme.MakeLabel(rows, "SoundLabel", "settings.sound", 20f, FontStyles.Bold, MenuTheme.TextPrimary, TextAlignmentOptions.TopLeft);
 		MenuTheme.Place(soundLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, -788f), new Vector2(900f, 28f));
 		soundLabel.characterSpacing = 4f;
-		MakeToggleRow(rows, "Music", "settings.music", "settings.music_hint", -830f, () => GameSettings.Music, GameSettings.SetMusic);
+		Guard("переключатель Music", delegate { MakeToggleRow(rows, "Music", "settings.music", "settings.music_hint", -830f, () => GameSettings.Music, GameSettings.SetMusic); });
 		TextMeshProUGUI controlsLabel = MenuTheme.MakeLabel(rows, "ControlsLabel", "settings.controls", 20f, FontStyles.Bold, MenuTheme.TextPrimary, TextAlignmentOptions.TopLeft);
 		MenuTheme.Place(controlsLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, -910f), new Vector2(900f, 28f));
 		controlsLabel.characterSpacing = 4f;
@@ -2328,8 +2413,11 @@ public class MainMenuUI : MonoBehaviour
 		for (int i = 0; i < ControlBindings.AllScopes.Length; i++)
 		{
 			ControlScope captured = ControlBindings.AllScopes[i];
-			Button button = MenuTheme.MakeButton(controlsRow, "Controls_" + captured, ControlBindings.TitleKey(captured), 52f, delegate { ShowControls(captured); }, 17f, TextAlignmentOptions.Center, 10f);
-			button.gameObject.AddComponent<LayoutElement>().preferredWidth = 360f;
+			Guard("кнопку раздела управления " + captured, delegate
+			{
+				Button button = MenuTheme.MakeButton(controlsRow, "Controls_" + captured, ControlBindings.TitleKey(captured), 52f, delegate { ShowControls(captured); }, 17f, TextAlignmentOptions.Center, 10f);
+				button.gameObject.AddComponent<LayoutElement>().preferredWidth = 360f;
+			});
 		}
 		RefreshLanguageButtons();
 		RefreshDefaultModeButtons();

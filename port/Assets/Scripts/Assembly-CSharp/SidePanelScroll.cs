@@ -67,7 +67,9 @@ public static class SidePanelScroll
 		rectTransform.pivot = panel.pivot;
 		rectTransform.anchoredPosition = panel.anchoredPosition;
 		rectTransform.SetSiblingIndex(panel.GetSiblingIndex());
-		gameObject.AddComponent<Mask>();
+		// RectMask2D, not Mask: the viewport has no Graphic of its own, so a
+		// stencil Mask would never write the stencil buffer and would clip nothing.
+		gameObject.AddComponent<RectMask2D>();
 		ScrollRect scrollRect = gameObject.AddComponent<ScrollRect>();
 		scrollRect.horizontal = false;
 		scrollRect.movementType = ScrollRect.MovementType.Clamped;

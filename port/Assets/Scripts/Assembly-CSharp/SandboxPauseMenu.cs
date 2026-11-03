@@ -505,7 +505,8 @@ public class SandboxPauseMenu : MonoBehaviour
 		rectTransform2.anchorMax = Vector2.one;
 		rectTransform2.offsetMin = new Vector2(14f, 6f);
 		rectTransform2.offsetMax = new Vector2(-14f, -6f);
-		rectTransform2.gameObject.AddComponent<Mask>();
+		// Text area has no Graphic: use RectMask2D so the input text is actually clipped.
+		rectTransform2.gameObject.AddComponent<RectMask2D>();
 		TextMeshProUGUI textMeshProUGUI = MenuTheme.MakeLabel(rectTransform2, "Placeholder", placeholderKey, 18f, FontStyles.Italic, MenuTheme.TextLocked, TextAlignmentOptions.Left);
 		MenuTheme.Stretch(textMeshProUGUI.rectTransform);
 		TextMeshProUGUI textMeshProUGUI2 = MenuTheme.MakeLabelRaw(rectTransform2, "Text", "", 18f, FontStyles.Normal, MenuTheme.TextPrimary, TextAlignmentOptions.Left);

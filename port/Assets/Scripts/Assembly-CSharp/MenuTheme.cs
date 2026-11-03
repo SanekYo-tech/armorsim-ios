@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
@@ -67,6 +68,8 @@ public static class MenuTheme
 	public static TMP_FontAsset Font;
 
 	public const float ScrollbarWidth = 10f;
+
+	private static readonly HashSet<int> s_loggedScrolls = new HashSet<int>();
 
 	public static bool SuperBenchActive
 	{
@@ -378,10 +381,15 @@ public static class MenuTheme
 		scrollRect.scrollSensitivity = 40f;
 		RectTransform viewport = MakeRect(root, "Viewport");
 		Stretch(viewport, Vector2.zero, new Vector2(-14f, 0f));
-		viewport.gameObject.AddComponent<Mask>();
 		Image viewportImage = viewport.gameObject.AddComponent<Image>();
 		viewportImage.color = new Color(0f, 0f, 0f, 0f);
 		viewportImage.raycastTarget = true;
+		// Stencil-Mask requires the mask graphic to survive UNITY_UI_ALPHACLIP.
+		// The viewport image is fully transparent, so with Mask the stencil is never
+		// written and every child fails the stencil test (only the scrollbar stays
+		// visible). RectMask2D clips with the scissor rectangle instead and has the
+		// same rectangular shape here because the viewport has no sprite.
+		viewport.gameObject.AddComponent<RectMask2D>();
 		content = MakeRect(viewport, "Content");
 		content.anchorMin = new Vector2(0f, 1f);
 		content.anchorMax = Vector2.one;
@@ -422,5 +430,62 @@ public static class MenuTheme
 		scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
 		scrollRect.verticalScrollbarSpacing = 4f;
 		return scrollRect;
+	}
+
+	/// <summary>
+	/// Пересчитывает ScrollRect после активации панели или изменения списка.
+	/// Панели меню строятся под неактивным родителем, поэтому ContentSizeFitter
+	/// может не задать высоту Content до первого показа.
+	/// </summary>
+	internal static void RefreshScrollLayout(ScrollRect scroll, string tag)
+	{
+		if (scroll == null)
+		{
+			return;
+		}
+		RectTransform content = scroll.content;
+		if (content == null)
+		{
+			Debug.LogWarning("[MenuTheme] " + tag + ": у ScrollRect нет content — пересчёт раскладки пропущен.");
+			return;
+		}
+		Canvas.ForceUpdateCanvases();
+		RectTransform root = scroll.transform as RectTransform;
+		if (root != null)
+		{
+			LayoutRebuilder.ForceRebuildLayoutImmediate(root);
+		}
+		LayoutRebuilder.ForceRebuildLayoutImmediate(content);
+		float preferred = LayoutUtility.GetPreferredHeight(content);
+		if (content.childCount > 0 && preferred > 0.01f && content.rect.height < preferred - 0.5f)
+		{
+			Debug.LogWarning(string.Format("[MenuTheme] {0}: Content не подстроился ({1:F1} < {2:F1}) — задаю высоту вручную.", tag, content.rect.height, preferred));
+			content.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, preferred);
+			LayoutRebuilder.ForceRebuildLayoutImmediate(content);
+		}
+		Canvas.ForceUpdateCanvases();
+		LogScrollLayout(scroll, tag);
+	}
+
+	private static void LogScrollLayout(ScrollRect scroll, string tag)
+	{
+		RectTransform content = scroll.content;
+		if (content == null)
+		{
+			return;
+		}
+		RectTransform viewport = scroll.viewport;
+		float contentHeight = content.rect.height;
+		float viewportHeight = (viewport != null) ? viewport.rect.height : -1f;
+		int children = content.childCount;
+		bool active = scroll.gameObject.activeInHierarchy;
+		if (s_loggedScrolls.Add(scroll.GetInstanceID()))
+		{
+			Debug.Log(string.Format("[MenuTheme] {0}: content={1:F0}, viewport={2:F0}, children={3}, active={4}", tag, contentHeight, viewportHeight, children, active));
+		}
+		if (viewportHeight <= 0.5f || (children > 0 && contentHeight <= 0.5f))
+		{
+			Debug.LogWarning(string.Format("[MenuTheme] {0}: подозрительная раскладка — content={1:F0}, viewport={2:F0}, children={3}, active={4}", tag, contentHeight, viewportHeight, children, active));
+		}
 	}
 }

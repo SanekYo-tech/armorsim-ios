@@ -1208,6 +1208,8 @@ public sealed class SuperViewerUI : MonoBehaviour
 			FillMine(transform);
 		}
 		TickLibrary();
+		ScrollRect scroll = (_libViewport != null) ? _libViewport.GetComponentInParent<ScrollRect>() : null;
+		MenuTheme.RefreshScrollLayout(scroll, "SuperViewer.Library");
 	}
 
 	private static void Kill(UnityEngine.Object o)
@@ -1288,7 +1290,14 @@ public sealed class SuperViewerUI : MonoBehaviour
 		{
 			foreach (SuperTapeLibrary.Entry item in list)
 			{
-				MakeMineRow(content, item);
+				try
+				{
+					MakeMineRow(content, item);
+				}
+				catch (Exception ex)
+				{
+					Debug.LogError("[SuperViewerUI] не удалось построить строку «" + item.name + "» — продолжаю. " + ex);
+				}
 			}
 			return;
 		}
