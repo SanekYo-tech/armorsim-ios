@@ -1,0 +1,2069 @@
+// Restored from SuperRecon.asset (DXBC) + SuperReconGpu.cs
+// Unity compute shader source reconstruction.  Buffer names are the exact
+// SetBuffer/ComputeShader names; cbuffer slots were recovered semantically
+// from SuperReconGpu.Set* call sites (see slot table in the report).
+
+#pragma kernel KReconProbe
+#pragma kernel KReconSnap
+#pragma kernel KReconBoundsP
+#pragma kernel KReconBoundsLevel
+#pragma kernel KReconBoundsFinal
+#pragma kernel KReconSlotClear
+#pragma kernel KReconSlotCount
+#pragma kernel KReconScanBlocks
+#pragma kernel KReconScanBlocksIP
+#pragma kernel KReconScanSeq
+#pragma kernel KReconScanApply
+#pragma kernel KReconScatter
+#pragma kernel KReconSortCells
+#pragma kernel KReconKeyDiag
+#pragma kernel KReconNodeDiag
+#pragma kernel KReconBlockClear
+#pragma kernel KReconExtentClear
+#pragma kernel KReconBlockSample
+#pragma kernel KReconBlockDilate
+#pragma kernel KReconVertexFields
+#pragma kernel KReconSabTouch
+
+// ---- $Globals (cb0) ----
+int   _DispStrideX;      // cb0[0].x
+int   _DispGroupsX;      // cb0[0].y
+int   _DispOffset;       // cb0[0].z
+int   _DispEnd;          // cb0[0].w
+int   _RcN;              // cb0[1].x
+int   _RcNumBodies;      // cb0[1].y
+int   _RcOcc;            // cb0[1].z
+int   _RcTotal;          // cb0[1].w
+int   _RcBlockTotal;     // cb0[2].x
+int   _RcNodes;          // cb0[2].y
+int   _RcStart;          // cb0[2].z
+int   _RcCount;          // cb0[2].w
+int   _RcBody;           // cb0[3].x
+int   _RcPass;           // cb0[3].y
+int   _RcVertCount;      // cb0[3].z
+int   _RcExclude;        // cb0[3].w
+int   _RcSabPred;        // cb0[4].x
+int   _RcSabNudge;       // cb0[4].y
+float4 _RcGridLo;        // cb0[5]
+float4 _RcGridHi;        // cb0[6]
+int   _RcConstField;     // cb0[7].x
+float _RcConstValue;     // cb0[7].y
+int   _RcMutField;       // cb0[7].z
+float _RcMutScale;       // cb0[7].w
+float _RcMutAdd;         // cb0[8].x
+int   _RcMutTap;         // cb0[8].y
+int   _RcSortDesc;       // cb0[8].z
+int   _RcDilateSpanSab;  // cb0[8].w
+int   _RcWholeWindow;    // cb0[9].x
+int   _ScanN;            // cb0[9].y
+int   _ScanTotalAt;      // cb0[9].z
+int   _RcProbeSalt;      // cb0[9].w
+
+// NOTE: element types below are the decompiler's raw typed-buffer view.
+// DXBC bodies address these buffers in 32-bit words (Buffer<uint>[word].x);
+// the real C# strides are listed in the trailing comments.
+
+// ---- SRV (mode R) ----
+StructuredBuffer<uint> _SolPosR;         // RcPos (solver), float3
+StructuredBuffer<uint> _SolVelR;         // RcVel (solver), float3
+StructuredBuffer<uint> _SolScalR;        // RcScal (solver), float4
+StructuredBuffer<uint> _SolSR;           // RcS (solver), 9 floats
+StructuredBuffer<uint> _SolDmgR;         // RcDmg (solver), float
+StructuredBuffer<uint> _RcPosR;          // RcPos, float3
+StructuredBuffer<uint> _RcPfR;           // RcPf, float x5 fields
+StructuredBuffer<uint> _RcOrderR;        // RcOrder, uint
+StructuredBuffer<uint> _RcSlotStartR;    // RcSlotStart, uint
+StructuredBuffer<uint> _RcBrickR;        // RcBrick, int
+StructuredBuffer<uint> _RcBodyR;         // RcBody, 80-byte record
+StructuredBuffer<uint> _RcKeysR;         // RcKeys, uint
+StructuredBuffer<uint> _RcNodeR;         // RcNode, {uint cell, float coord}
+StructuredBuffer<uint> _RcStartR;        // RcStart, uint
+StructuredBuffer<uint> _RcBlockBaseR;    // RcBlockBase, uint
+StructuredBuffer<uint> _RcBoundsInR;     // RcBoundsA/B, 28-byte record
+StructuredBuffer<uint> _RcExtentR;       // RcExtent, int x6 per body
+StructuredBuffer<uint> _RcMaskPrevR;     // RcMask0/1, uint
+StructuredBuffer<uint> _RcVertsR;        // RcVerts, float3
+StructuredBuffer<uint> _ScanInR;         // RcSlotCnt, uint
+StructuredBuffer<uint> _ScanAddR;        // RcScanL2, uint
+
+// ---- UAV (mode U) ----
+RWStructuredBuffer<uint> _RcProbe;        // RcProbe
+RWStructuredBuffer<uint> _RcPos;          // RcPos
+RWStructuredBuffer<uint> _RcPf;           // RcPf
+RWStructuredBuffer<uint> _RcBoundsOut;    // RcBoundsOut / RcBoundsA/B
+RWStructuredBuffer<uint> _RcSlotCnt;      // RcSlotCnt
+RWStructuredBuffer<uint> _ScanOut;        // RcSlotStart
+RWStructuredBuffer<uint> _ScanSums;       // RcScanL1 / RcScanL2
+RWStructuredBuffer<uint> _ScanIO;         // RcScanL1 / RcSlotStart
+RWStructuredBuffer<uint> _ScanTotalOut;   // RcSlotStart
+RWStructuredBuffer<uint> _RcOrder;        // RcOrder
+RWStructuredBuffer<uint> _RcSync;         // RcSync
+RWStructuredBuffer<uint> _RcVField;       // RcVField
+RWStructuredBuffer<uint> _RcExtent;       // RcExtent
+RWStructuredBuffer<uint> _RcBlock;        // RcBlock
+RWStructuredBuffer<uint> _RcMaskOut;      // RcMask0/1
+RWStructuredBuffer<uint> _RcMaskOut1;     // RcMask1/0
+RWStructuredBuffer<uint> _SabVel;         // solver velocity (sabotage touch)
+
+// ---- shared state ----
+uint spvBitfieldInsert(uint Base, uint Insert, uint Offset, uint Count)
+{
+    uint Mask = Count == 32 ? 0xffffffff : (((1u << Count) - 1) << (Offset & 31));
+    return (Base & ~Mask) | ((Insert << Offset) & Mask);
+}
+uint2 spvBitfieldInsert(uint2 Base, uint2 Insert, uint Offset, uint Count)
+{
+    uint Mask = Count == 32 ? 0xffffffff : (((1u << Count) - 1) << (Offset & 31));
+    return (Base & ~Mask) | ((Insert << Offset) & Mask);
+}
+uint3 spvBitfieldInsert(uint3 Base, uint3 Insert, uint Offset, uint Count)
+{
+    uint Mask = Count == 32 ? 0xffffffff : (((1u << Count) - 1) << (Offset & 31));
+    return (Base & ~Mask) | ((Insert << Offset) & Mask);
+}
+uint4 spvBitfieldInsert(uint4 Base, uint4 Insert, uint Offset, uint Count)
+{
+    uint Mask = Count == 32 ? 0xffffffff : (((1u << Count) - 1) << (Offset & 31));
+    return (Base & ~Mask) | ((Insert << Offset) & Mask);
+}
+
+
+[numthreads(256, 1, 1)]
+void KReconProbe(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_DispEnd)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    r0.y = asfloat(asint(r0.x) * (-1640531535));
+    r0.y = asfloat(asuint(r0.y) ^ asuint(_RcProbeSalt));
+    _RcProbe[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconSnap(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_RcN)) ? 4294967295u : 0u);
+    r0.z = asfloat((asuint(r0.x) >= asuint(_DispEnd)) ? 4294967295u : 0u);
+    r0.y = asfloat(asuint(r0.z) | asuint(r0.y));
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    uint _110 = (uint(asint(r0.x)) * 3u) + (uint(0) >> 2u);
+    float3 _123 = asfloat(uint3(_SolPosR[_110].x, _SolPosR[_110 + 1u].x, _SolPosR[_110 + 2u].x));
+    r0 = float4(r0.x, _123.x, _123.y, _123.z);
+    uint _132 = (uint(asint(r0.x)) * 3u) + (uint(0) >> 2u);
+    uint3 _135 = asuint(r0.yzw);
+    _RcPos[_132] = _135.x;
+    _RcPos[_132 + 1u] = _135.y;
+    _RcPos[_132 + 2u] = _135.z;
+    float4 r1;
+    float4 r2;
+    if (asuint(_RcConstField) != 0u)
+    {
+        r0 = float4(r0.x, _RcConstValue, _RcConstValue, _RcConstValue);
+        r1 = float4(_RcConstValue, _RcConstValue, r1.z, r1.w);
+    }
+    else
+    {
+        r0.y = asfloat(_SolScalR[(uint(asint(r0.x)) * 4u) + (uint(0) >> 2u)].x);
+        r0.w = asfloat(_SolScalR[(uint(asint(r0.x)) * 4u) + (uint(8) >> 2u)].x);
+        uint _188 = (uint(asint(r0.x)) * 3u) + (uint(0) >> 2u);
+        float3 _198 = asfloat(uint3(_SolVelR[_188].x, _SolVelR[_188 + 1u].x, _SolVelR[_188 + 2u].x));
+        r2 = float4(_198.x, _198.y, _198.z, r2.w);
+        uint _207 = (uint(asint(r0.x)) * 9u) + (uint(0) >> 2u);
+        float4 r3 = asfloat(uint4(_SolSR[_207].x, _SolSR[_207 + 1u].x, _SolSR[_207 + 2u].x, _SolSR[_207 + 3u].x));
+        uint _228 = (uint(asint(r0.x)) * 9u) + (uint(16) >> 2u);
+        float4 r4 = asfloat(uint4(_SolSR[_228].x, _SolSR[_228 + 1u].x, _SolSR[_228 + 2u].x, _SolSR[_228 + 3u].x));
+        r1.z = asfloat(_SolSR[(uint(asint(r0.x)) * 9u) + (uint(32) >> 2u)].x);
+        float3 _258 = r2.xyz * r2.xyz;
+        r2 = float4(_258.x, _258.y, _258.z, r2.w);
+        r1.w = r2.y + r2.x;
+        r1.w = r2.z + r1.w;
+        r0.z = sqrt(r1.w);
+        r2 = r3 * r3;
+        r1.w = r2.y + r2.x;
+        r1.w = r2.z + r1.w;
+        r1.w = r2.w + r1.w;
+        r2 = r4 * r4;
+        r1.w += r2.x;
+        r1.w = r2.y + r1.w;
+        r1.w = r2.z + r1.w;
+        r1.w = r2.w + r1.w;
+        r1.z *= r1.z;
+        r1.z += r1.w;
+        r1.z *= 1.5f;
+        r1.z = sqrt(r1.z);
+        r1.x = r1.z * 9.999999717180685365747194737196e-10f;
+        r1.y = asfloat(_SolDmgR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
+    }
+    int4 _367 = asint(int4(_RcMutField));
+    bool4 _374 = bool4(_367.x == int4(1, 2, 3, 4).x, _367.y == int4(1, 2, 3, 4).y, _367.z == int4(1, 2, 3, 4).z, _367.w == int4(1, 2, 3, 4).w);
+    r2 = asfloat(uint4(_374.x ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).x : uint4(0u, 0u, 0u, 0u).x, _374.y ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).y : uint4(0u, 0u, 0u, 0u).y, _374.z ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).z : uint4(0u, 0u, 0u, 0u).z, _374.w ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).w : uint4(0u, 0u, 0u, 0u).w));
+    r1.z = r0.y * _RcMutScale;
+    r1.z += _RcMutAdd;
+    r0.y = (asuint(r2.x) != 0u) ? r1.z : r0.y;
+    r1.z = r0.z * _RcMutScale;
+    r1.z += _RcMutAdd;
+    r0.z = (asuint(r2.y) != 0u) ? r1.z : r0.z;
+    r1.z = r0.w * _RcMutScale;
+    r1.z += _RcMutAdd;
+    r0.w = (asuint(r2.z) != 0u) ? r1.z : r0.w;
+    float2 _458 = r1.xy * float2(_RcMutScale);
+    r1 = float4(r1.x, r1.y, _458.x, _458.y);
+    float2 _466 = r1.zw + float2(_RcMutAdd);
+    r1 = float4(r1.x, r1.y, _466.x, _466.y);
+    r1.x = (asuint(r2.w) != 0u) ? r1.z : r1.x;
+    r1.z = asfloat((asint(_RcMutField) == 5) ? 4294967295u : 0u);
+    r1.y = (asuint(r1.z) != 0u) ? r1.w : r1.y;
+    _RcPf[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+    r0.y = asfloat(asint(r0.x) + asint(_RcN));
+    _RcPf[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z).x;
+    float2 _537 = asfloat(asint(int2(_RcN)) << int2(1, 2));
+    r0 = float4(r0.x, _537.x, _537.y, r0.w);
+    float2 _547 = asfloat(asint(r0.xx) + asint(r0.yz));
+    r0 = float4(r0.x, _547.x, _547.y, r0.w);
+    _RcPf[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.w).x;
+    r0.x = asfloat((3 * asint(_RcN)) + asint(r0.x));
+    _RcPf[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x).x;
+    _RcPf[(uint(asint(r0.z)) * 1u) + (uint(0) >> 2u)] = asuint(r1.y).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconBoundsP(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
+{
+    groupshared uint g0_002[768];
+    groupshared uint g1_002[768];
+    groupshared uint g2_002[256];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) < asuint(_RcCount)) ? 4294967295u : 0u);
+    r0.x = asfloat(asint(r0.x) + asint(_RcStart));
+    uint _99 = (uint(asint(r0.x)) * 3u) + (uint(0) >> 2u);
+    float3 _112 = asfloat(uint3(_RcPosR[_99].x, _RcPosR[_99 + 1u].x, _RcPosR[_99 + 2u].x));
+    float4 r1;
+    r1 = float4(_112.x, _112.y, _112.z, r1.w);
+    bool3 _122 = bool3(r1.xyz.x < _RcGridLo.xyz.x, r1.xyz.y < _RcGridLo.xyz.y, r1.xyz.z < _RcGridLo.xyz.z);
+    float3 _126 = asfloat(uint3(_122.x ? uint3(4294967295u, 4294967295u, 4294967295u).x : uint3(0u, 0u, 0u).x, _122.y ? uint3(4294967295u, 4294967295u, 4294967295u).y : uint3(0u, 0u, 0u).y, _122.z ? uint3(4294967295u, 4294967295u, 4294967295u).z : uint3(0u, 0u, 0u).z));
+    float4 r2;
+    r2 = float4(_126.x, _126.y, _126.z, r2.w);
+    r0.z = asfloat(asuint(r2.y) | asuint(r2.x));
+    r0.z = asfloat(asuint(r2.z) | asuint(r0.z));
+    bool3 _153 = bool3(_RcGridHi.xyz.x < r1.xyz.x, _RcGridHi.xyz.y < r1.xyz.y, _RcGridHi.xyz.z < r1.xyz.z);
+    float3 _155 = asfloat(uint3(_153.x ? uint3(4294967295u, 4294967295u, 4294967295u).x : uint3(0u, 0u, 0u).x, _153.y ? uint3(4294967295u, 4294967295u, 4294967295u).y : uint3(0u, 0u, 0u).y, _153.z ? uint3(4294967295u, 4294967295u, 4294967295u).z : uint3(0u, 0u, 0u).z));
+    r2 = float4(_155.x, _155.y, _155.z, r2.w);
+    r0.z = asfloat(asuint(r0.z) | asuint(r2.x));
+    r0.z = asfloat(asuint(r2.y) | asuint(r0.z));
+    r0.z = asfloat(asuint(r2.z) | asuint(r0.z));
+    r0.x = asfloat(_SolDmgR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
+    r0.w = asfloat((asint(_RcExclude) != 0) ? 4294967295u : 0u);
+    r2.x = asfloat((1.0f < r0.x) ? 4294967295u : 0u);
+    r0.x = asfloat((r0.x >= 1.0f) ? 4294967295u : 0u);
+    r0.x = (asuint(_RcSabPred) != 0u) ? r2.x : r0.x;
+    r0.x = asfloat(asuint(r0.x) & asuint(r0.w));
+    float2 _244 = asfloat(~asuint(r0.xz));
+    r0 = float4(_244.x, r0.y, _244.y, r0.w);
+    r0.x = asfloat(asuint(r0.x) & asuint(r0.z));
+    uint4 _258 = asuint(r0.xxxx);
+    bool4 _266 = bool4(_258.x != uint4(0u, 0u, 0u, 0u).x, _258.y != uint4(0u, 0u, 0u, 0u).y, _258.z != uint4(0u, 0u, 0u, 0u).z, _258.w != uint4(0u, 0u, 0u, 0u).w);
+    r2 = float4(_266.x ? r1.xyzx.x : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).x, _266.y ? r1.xyzx.y : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).y, _266.z ? r1.xyzx.z : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).z, _266.w ? r1.xyzx.w : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).w);
+    r1.w = 1.4012984643248170709237295832899e-45f;
+    uint3 _272 = asuint(r0.xxx);
+    bool3 _277 = bool3(_272.x != uint3(0u, 0u, 0u).x, _272.y != uint3(0u, 0u, 0u).y, _272.z != uint3(0u, 0u, 0u).z);
+    float3 _278 = float3(_277.x ? r1.yzw.x : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).x, _277.y ? r1.yzw.y : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).y, _277.z ? r1.yzw.z : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).z);
+    r0 = float4(_278.x, r0.y, _278.y, _278.z);
+    uint4 _283 = asuint(r0.yyyy);
+    bool4 _285 = bool4(_283.x != uint4(0u, 0u, 0u, 0u).x, _283.y != uint4(0u, 0u, 0u, 0u).y, _283.z != uint4(0u, 0u, 0u, 0u).z, _283.w != uint4(0u, 0u, 0u, 0u).w);
+    r1 = float4(_285.x ? r2.x : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).x, _285.y ? r2.y : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).y, _285.z ? r2.z : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).z, _285.w ? r2.w : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).w);
+    uint3 _289 = asuint(r0.yyy);
+    bool3 _292 = bool3(_289.x != uint3(0u, 0u, 0u).x, _289.y != uint3(0u, 0u, 0u).y, _289.z != uint3(0u, 0u, 0u).z);
+    float3 _293 = float3(_292.x ? r0.xzw.x : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).x, _292.y ? r0.xzw.y : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).y, _292.z ? r0.xzw.z : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).z);
+    r0 = float4(_293.x, _293.y, _293.z, r0.w);
+    uint _301 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+    uint3 _304 = asuint(r1.xyz);
+    g0_002[_301] = _304.x;
+    g0_002[_301 + 1u] = _304.y;
+    g0_002[_301 + 2u] = _304.z;
+    r0.w = r1.w;
+    uint _320 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+    uint3 _323 = asuint(r0.wxy);
+    g1_002[_320] = _323.x;
+    g1_002[_320 + 1u] = _323.y;
+    g1_002[_320 + 2u] = _323.z;
+    g2_002[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z);
+    r0.x = asfloat((int(gl_WorkGroupID.y) * asint(_DispGroupsX)) + int(gl_WorkGroupID.x));
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = 1.7936620343357658507823738666111e-43f;
+    for (;;)
+    {
+        r0.z = asfloat((0u >= asuint(r0.y)) ? 4294967295u : 0u);
+        if (asuint(r0.z) != 0u)
+        {
+            break;
+        }
+        r0.z = asfloat((uint(int(gl_LocalInvocationID.x)) < asuint(r0.y)) ? 4294967295u : 0u);
+        if (asuint(r0.z) != 0u)
+        {
+            uint _392 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            float3 _402 = asfloat(uint3(g0_002[_392], g0_002[_392 + 1u], g0_002[_392 + 2u]));
+            r1 = float4(_402.x, _402.y, _402.z, r1.w);
+            r0.z = asfloat(asint(r0.y) + int(gl_LocalInvocationID.x));
+            uint _418 = (uint(asint(r0.z)) * 3u) + (uint(0) >> 2u);
+            float3 _428 = asfloat(uint3(g0_002[_418], g0_002[_418 + 1u], g0_002[_418 + 2u]));
+            r2 = float4(_428.x, _428.y, _428.z, r2.w);
+            bool3 _675 = isnan(r1.xyz);
+            bool3 _676 = isnan(r2.xyz);
+            float3 _677 = min(r1.xyz, r2.xyz);
+            float3 _678 = float3(_675.x ? r2.xyz.x : _677.x, _675.y ? r2.xyz.y : _677.y, _675.z ? r2.xyz.z : _677.z);
+            float3 _436 = float3(_676.x ? r1.xyz.x : _678.x, _676.y ? r1.xyz.y : _678.y, _676.z ? r1.xyz.z : _678.z);
+            r1 = float4(_436.x, _436.y, _436.z, r1.w);
+            uint _443 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            uint3 _446 = asuint(r1.xyz);
+            g0_002[_443] = _446.x;
+            g0_002[_443 + 1u] = _446.y;
+            g0_002[_443 + 2u] = _446.z;
+            uint _459 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            float3 _469 = asfloat(uint3(g1_002[_459], g1_002[_459 + 1u], g1_002[_459 + 2u]));
+            r1 = float4(_469.x, _469.y, _469.z, r1.w);
+            uint _477 = (uint(asint(r0.z)) * 3u) + (uint(0) >> 2u);
+            float3 _487 = asfloat(uint3(g1_002[_477], g1_002[_477 + 1u], g1_002[_477 + 2u]));
+            r2 = float4(_487.x, _487.y, _487.z, r2.w);
+            bool3 _680 = isnan(r1.xyz);
+            bool3 _681 = isnan(r2.xyz);
+            float3 _682 = max(r1.xyz, r2.xyz);
+            float3 _683 = float3(_680.x ? r2.xyz.x : _682.x, _680.y ? r2.xyz.y : _682.y, _680.z ? r2.xyz.z : _682.z);
+            float3 _494 = float3(_681.x ? r1.xyz.x : _683.x, _681.y ? r1.xyz.y : _683.y, _681.z ? r1.xyz.z : _683.z);
+            r1 = float4(_494.x, _494.y, _494.z, r1.w);
+            uint _501 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            uint3 _504 = asuint(r1.xyz);
+            g1_002[_501] = _504.x;
+            g1_002[_501 + 1u] = _504.y;
+            g1_002[_501 + 2u] = _504.z;
+            r0.w = asfloat(g2_002[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)]);
+            r0.z = asfloat(g2_002[(uint(asint(r0.z)) * 1u) + (uint(0) >> 2u)]);
+            r0.z = asfloat(asint(r0.z) + asint(r0.w));
+            g2_002[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z);
+        }
+        GroupMemoryBarrierWithGroupSync();
+        r0.y = asfloat(asuint(r0.y) >> 1u);
+        continue;
+    }
+    r0.y = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
+    r0.z = asfloat(asint(_RcCount) + 255);
+    r0.z = asfloat(asuint(r0.z) >> 8u);
+    r0.z = asfloat((asuint(r0.x) < asuint(r0.z)) ? 4294967295u : 0u);
+    r0.y = asfloat(asuint(r0.z) & asuint(r0.y));
+    if (asuint(r0.y) != 0u)
+    {
+        uint _604 = (uint(0) * 3u) + (uint(0) >> 2u);
+        float3 _614 = asfloat(uint3(g0_002[_604], g0_002[_604 + 1u], g0_002[_604 + 2u]));
+        r1 = float4(_614.x, _614.y, _614.z, r1.w);
+        uint _619 = (uint(0) * 3u) + (uint(0) >> 2u);
+        float3 _629 = asfloat(uint3(g1_002[_619], g1_002[_619 + 1u], g1_002[_619 + 2u]));
+        r2 = float4(_629.x, _629.y, _629.z, r2.w);
+        r2.w = asfloat(g2_002[(uint(0) * 1u) + (uint(0) >> 2u)]);
+        r1.w = r2.x;
+        uint _648 = (uint(asint(r0.x)) * 7u) + (uint(0) >> 2u);
+        uint4 _650 = asuint(r1);
+        _RcBoundsOut[_648] = _650.x;
+        _RcBoundsOut[_648 + 1u] = _650.y;
+        _RcBoundsOut[_648 + 2u] = _650.z;
+        _RcBoundsOut[_648 + 3u] = _650.w;
+        uint _665 = (uint(asint(r0.x)) * 7u) + (uint(16) >> 2u);
+        uint3 _668 = asuint(r2.yzw);
+        _RcBoundsOut[_665] = _668.x;
+        _RcBoundsOut[_665 + 1u] = _668.y;
+        _RcBoundsOut[_665 + 2u] = _668.z;
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KReconBoundsLevel(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
+{
+    groupshared uint g0_003[768];
+    groupshared uint g1_003[768];
+    groupshared uint g2_003[256];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) < asuint(_RcCount)) ? 4294967295u : 0u);
+    uint _88 = (uint(asint(r0.x)) * 7u) + (uint(0) >> 2u);
+    float4 r1 = asfloat(uint4(_RcBoundsInR[_88].x, _RcBoundsInR[_88 + 1u].x, _RcBoundsInR[_88 + 2u].x, _RcBoundsInR[_88 + 3u].x));
+    uint _110 = (uint(asint(r0.x)) * 7u) + (uint(16) >> 2u);
+    float3 _122 = asfloat(uint3(_RcBoundsInR[_110].x, _RcBoundsInR[_110 + 1u].x, _RcBoundsInR[_110 + 2u].x));
+    r0 = float4(_122.x, r0.y, _122.y, _122.z);
+    uint4 _127 = asuint(r0.yyyy);
+    bool4 _134 = bool4(_127.x != uint4(0u, 0u, 0u, 0u).x, _127.y != uint4(0u, 0u, 0u, 0u).y, _127.z != uint4(0u, 0u, 0u, 0u).z, _127.w != uint4(0u, 0u, 0u, 0u).w);
+    r1 = float4(_134.x ? r1.x : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).x, _134.y ? r1.y : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).y, _134.z ? r1.z : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).z, _134.w ? r1.w : float4(3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, 3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f).w);
+    uint3 _138 = asuint(r0.yyy);
+    bool3 _145 = bool3(_138.x != uint3(0u, 0u, 0u).x, _138.y != uint3(0u, 0u, 0u).y, _138.z != uint3(0u, 0u, 0u).z);
+    float3 _146 = float3(_145.x ? r0.xzw.x : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).x, _145.y ? r0.xzw.y : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).y, _145.z ? r0.xzw.z : float3(-3.4028234663852885981170418348452e+38f, -3.4028234663852885981170418348452e+38f, 0.0f).z);
+    r0 = float4(_146.x, _146.y, _146.z, r0.w);
+    uint _154 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+    uint3 _157 = asuint(r1.xyz);
+    g0_003[_154] = _157.x;
+    g0_003[_154 + 1u] = _157.y;
+    g0_003[_154 + 2u] = _157.z;
+    r0.w = r1.w;
+    uint _173 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+    uint3 _176 = asuint(r0.wxy);
+    g1_003[_173] = _176.x;
+    g1_003[_173 + 1u] = _176.y;
+    g1_003[_173 + 2u] = _176.z;
+    g2_003[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z);
+    r0.x = asfloat((int(gl_WorkGroupID.y) * asint(_DispGroupsX)) + int(gl_WorkGroupID.x));
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = 1.7936620343357658507823738666111e-43f;
+    float4 r2;
+    for (;;)
+    {
+        r0.z = asfloat((0u >= asuint(r0.y)) ? 4294967295u : 0u);
+        if (asuint(r0.z) != 0u)
+        {
+            break;
+        }
+        r0.z = asfloat((uint(int(gl_LocalInvocationID.x)) < asuint(r0.y)) ? 4294967295u : 0u);
+        if (asuint(r0.z) != 0u)
+        {
+            uint _245 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            float3 _255 = asfloat(uint3(g0_003[_245], g0_003[_245 + 1u], g0_003[_245 + 2u]));
+            r1 = float4(_255.x, _255.y, _255.z, r1.w);
+            r0.z = asfloat(asint(r0.y) + int(gl_LocalInvocationID.x));
+            uint _271 = (uint(asint(r0.z)) * 3u) + (uint(0) >> 2u);
+            float3 _281 = asfloat(uint3(g0_003[_271], g0_003[_271 + 1u], g0_003[_271 + 2u]));
+            r2 = float4(_281.x, _281.y, _281.z, r2.w);
+            bool3 _527 = isnan(r1.xyz);
+            bool3 _528 = isnan(r2.xyz);
+            float3 _529 = min(r1.xyz, r2.xyz);
+            float3 _530 = float3(_527.x ? r2.xyz.x : _529.x, _527.y ? r2.xyz.y : _529.y, _527.z ? r2.xyz.z : _529.z);
+            float3 _289 = float3(_528.x ? r1.xyz.x : _530.x, _528.y ? r1.xyz.y : _530.y, _528.z ? r1.xyz.z : _530.z);
+            r1 = float4(_289.x, _289.y, _289.z, r1.w);
+            uint _296 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            uint3 _299 = asuint(r1.xyz);
+            g0_003[_296] = _299.x;
+            g0_003[_296 + 1u] = _299.y;
+            g0_003[_296 + 2u] = _299.z;
+            uint _312 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            float3 _322 = asfloat(uint3(g1_003[_312], g1_003[_312 + 1u], g1_003[_312 + 2u]));
+            r1 = float4(_322.x, _322.y, _322.z, r1.w);
+            uint _330 = (uint(asint(r0.z)) * 3u) + (uint(0) >> 2u);
+            float3 _340 = asfloat(uint3(g1_003[_330], g1_003[_330 + 1u], g1_003[_330 + 2u]));
+            r2 = float4(_340.x, _340.y, _340.z, r2.w);
+            bool3 _532 = isnan(r1.xyz);
+            bool3 _533 = isnan(r2.xyz);
+            float3 _534 = max(r1.xyz, r2.xyz);
+            float3 _535 = float3(_532.x ? r2.xyz.x : _534.x, _532.y ? r2.xyz.y : _534.y, _532.z ? r2.xyz.z : _534.z);
+            float3 _347 = float3(_533.x ? r1.xyz.x : _535.x, _533.y ? r1.xyz.y : _535.y, _533.z ? r1.xyz.z : _535.z);
+            r1 = float4(_347.x, _347.y, _347.z, r1.w);
+            uint _354 = (uint(int(gl_LocalInvocationID.x)) * 3u) + (uint(0) >> 2u);
+            uint3 _357 = asuint(r1.xyz);
+            g1_003[_354] = _357.x;
+            g1_003[_354 + 1u] = _357.y;
+            g1_003[_354 + 2u] = _357.z;
+            r0.w = asfloat(g2_003[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)]);
+            r0.z = asfloat(g2_003[(uint(asint(r0.z)) * 1u) + (uint(0) >> 2u)]);
+            r0.z = asfloat(asint(r0.z) + asint(r0.w));
+            g2_003[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z);
+        }
+        GroupMemoryBarrierWithGroupSync();
+        r0.y = asfloat(asuint(r0.y) >> 1u);
+        continue;
+    }
+    r0.y = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
+    r0.z = asfloat(asint(_RcCount) + 255);
+    r0.z = asfloat(asuint(r0.z) >> 8u);
+    r0.z = asfloat((asuint(r0.x) < asuint(r0.z)) ? 4294967295u : 0u);
+    r0.y = asfloat(asuint(r0.z) & asuint(r0.y));
+    if (asuint(r0.y) != 0u)
+    {
+        uint _457 = (uint(0) * 3u) + (uint(0) >> 2u);
+        float3 _467 = asfloat(uint3(g0_003[_457], g0_003[_457 + 1u], g0_003[_457 + 2u]));
+        r1 = float4(_467.x, _467.y, _467.z, r1.w);
+        uint _472 = (uint(0) * 3u) + (uint(0) >> 2u);
+        float3 _482 = asfloat(uint3(g1_003[_472], g1_003[_472 + 1u], g1_003[_472 + 2u]));
+        r2 = float4(_482.x, _482.y, _482.z, r2.w);
+        r2.w = asfloat(g2_003[(uint(0) * 1u) + (uint(0) >> 2u)]);
+        r1.w = r2.x;
+        uint _501 = (uint(asint(r0.x)) * 7u) + (uint(0) >> 2u);
+        uint4 _503 = asuint(r1);
+        _RcBoundsOut[_501] = _503.x;
+        _RcBoundsOut[_501 + 1u] = _503.y;
+        _RcBoundsOut[_501 + 2u] = _503.z;
+        _RcBoundsOut[_501 + 3u] = _503.w;
+        uint _517 = (uint(asint(r0.x)) * 7u) + (uint(16) >> 2u);
+        uint3 _520 = asuint(r2.yzw);
+        _RcBoundsOut[_517] = _520.x;
+        _RcBoundsOut[_517 + 1u] = _520.y;
+        _RcBoundsOut[_517 + 2u] = _520.z;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void KReconBoundsFinal()
+{
+    float4 r0;
+    r0.x = asfloat((asint(_RcSabNudge) != 0) ? 4294967295u : 0u);
+    r0.y = asfloat((asint(_RcBody) == 0) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.y) & asuint(r0.x));
+    uint _64 = (uint(0) * 7u) + (uint(16) >> 2u);
+    float3 _77 = asfloat(uint3(_RcBoundsInR[_64].x, _RcBoundsInR[_64 + 1u].x, _RcBoundsInR[_64 + 2u].x));
+    r0 = float4(r0.x, _77.x, _77.y, _77.z);
+    float4 r1;
+    r1.x = asfloat((0u < asuint(r0.w)) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.x) & asuint(r1.x));
+    uint _99 = (uint(0) * 7u) + (uint(0) >> 2u);
+    r1 = asfloat(uint4(_RcBoundsInR[_99].x, _RcBoundsInR[_99 + 1u].x, _RcBoundsInR[_99 + 2u].x, _RcBoundsInR[_99 + 3u].x));
+    r1.x = asfloat((-asint(r0.x)) + asint(r1.x));
+    uint _130 = (uint(asint(_RcBody)) * 7u) + (uint(0) >> 2u);
+    uint4 _132 = asuint(r1);
+    _RcBoundsOut[_130] = _132.x;
+    _RcBoundsOut[_130 + 1u] = _132.y;
+    _RcBoundsOut[_130 + 2u] = _132.z;
+    _RcBoundsOut[_130 + 3u] = _132.w;
+    uint _147 = (uint(asint(_RcBody)) * 7u) + (uint(16) >> 2u);
+    uint3 _150 = asuint(r0.yzw);
+    _RcBoundsOut[_147] = _150.x;
+    _RcBoundsOut[_147 + 1u] = _150.y;
+    _RcBoundsOut[_147 + 2u] = _150.z;
+}
+
+[numthreads(256, 1, 1)]
+void KReconSlotClear(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_RcOcc)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    _RcSlotCnt[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconSlotCount(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_RcN)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    r0.x = asfloat(_RcKeysR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
+    r0.z = asfloat((asint(r0.x) == (-1)) ? 4294967295u : 0u);
+    if (asuint(r0.z) != 0u)
+    {
+        return;
+    }
+    r0.z = asfloat((asuint(r0.x) >= asuint(_RcOcc)) ? 4294967295u : 0u);
+    if (asuint(r0.z) != 0u)
+    {
+        uint _122;
+        InterlockedOr(_RcSync[(uint(0) * 1u) + (uint(0) >> 2u)], 1u, _122);
+        return;
+    }
+    r0.y = 0.0f;
+    uint _135;
+    InterlockedAdd(_RcSlotCnt[(uint(asint(r0.x)) * 1u) + (uint(asint(r0.y)) >> 2u)], 1u, _135);
+}
+
+[numthreads(256, 1, 1)]
+void KReconScanBlocks(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
+{
+    groupshared uint g0_007[256];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) < asuint(_ScanN)) ? 4294967295u : 0u);
+    r0.z = asfloat(_ScanInR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
+    r0.z = asfloat(asuint(r0.z) & asuint(r0.y));
+    g0_007[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z);
+    GroupMemoryBarrierWithGroupSync();
+    r0.w = 1.4012984643248170709237295832899e-45f;
+    float4 r1;
+    for (;;)
+    {
+        r1.x = asfloat((asuint(r0.w) >= 256u) ? 4294967295u : 0u);
+        if (asuint(r1.x) != 0u)
+        {
+            break;
+        }
+        r1.x = asfloat((uint(int(gl_LocalInvocationID.x)) >= asuint(r0.w)) ? 4294967295u : 0u);
+        r1.y = asfloat((-asint(r0.w)) + int(gl_LocalInvocationID.x));
+        r1.y = asfloat(g0_007[(uint(asint(r1.y)) * 1u) + (uint(0) >> 2u)]);
+        r1.x = asfloat(asuint(r1.y) & asuint(r1.x));
+        GroupMemoryBarrierWithGroupSync();
+        r1.y = asfloat(g0_007[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)]);
+        r1.x = asfloat(asint(r1.x) + asint(r1.y));
+        g0_007[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x);
+        GroupMemoryBarrierWithGroupSync();
+        r0.w = asfloat(asint(r0.w) << 1);
+        continue;
+    }
+    if (asuint(r0.y) != 0u)
+    {
+        r0.y = asfloat(g0_007[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)]);
+        r0.y = asfloat((-asint(r0.z)) + asint(r0.y));
+        _ScanOut[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+    }
+    r0.x = asfloat((int(gl_LocalInvocationID.x) == 255) ? 4294967295u : 0u);
+    r0.y = asfloat((int(gl_WorkGroupID.y) * asint(_DispGroupsX)) + int(gl_WorkGroupID.x));
+    r0.z = asfloat(asint(_ScanN) + 255);
+    r0.z = asfloat(asuint(r0.z) >> 8u);
+    r0.z = asfloat((asuint(r0.y) < asuint(r0.z)) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.z) & asuint(r0.x));
+    if (asuint(r0.x) != 0u)
+    {
+        r0.x = asfloat(g0_007[(uint(255) * 1u) + (uint(0) >> 2u)]);
+        _ScanSums[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.x).x;
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KReconScanBlocksIP(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID, uint3 gl_WorkGroupID : SV_GroupID)
+{
+    groupshared uint g0_008[256];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) < asuint(_ScanN)) ? 4294967295u : 0u);
+    r0.z = asfloat(_ScanIO[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+    r0.z = asfloat(asuint(r0.z) & asuint(r0.y));
+    g0_008[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z);
+    GroupMemoryBarrierWithGroupSync();
+    r0.w = 1.4012984643248170709237295832899e-45f;
+    float4 r1;
+    for (;;)
+    {
+        r1.x = asfloat((asuint(r0.w) >= 256u) ? 4294967295u : 0u);
+        if (asuint(r1.x) != 0u)
+        {
+            break;
+        }
+        r1.x = asfloat((uint(int(gl_LocalInvocationID.x)) >= asuint(r0.w)) ? 4294967295u : 0u);
+        r1.y = asfloat((-asint(r0.w)) + int(gl_LocalInvocationID.x));
+        r1.y = asfloat(g0_008[(uint(asint(r1.y)) * 1u) + (uint(0) >> 2u)]);
+        r1.x = asfloat(asuint(r1.y) & asuint(r1.x));
+        GroupMemoryBarrierWithGroupSync();
+        r1.y = asfloat(g0_008[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)]);
+        r1.x = asfloat(asint(r1.x) + asint(r1.y));
+        g0_008[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x);
+        GroupMemoryBarrierWithGroupSync();
+        r0.w = asfloat(asint(r0.w) << 1);
+        continue;
+    }
+    if (asuint(r0.y) != 0u)
+    {
+        r0.y = asfloat(g0_008[(uint(int(gl_LocalInvocationID.x)) * 1u) + (uint(0) >> 2u)]);
+        r0.y = asfloat((-asint(r0.z)) + asint(r0.y));
+        _ScanIO[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+    }
+    r0.x = asfloat((int(gl_LocalInvocationID.x) == 255) ? 4294967295u : 0u);
+    r0.y = asfloat((int(gl_WorkGroupID.y) * asint(_DispGroupsX)) + int(gl_WorkGroupID.x));
+    r0.z = asfloat(asint(_ScanN) + 255);
+    r0.z = asfloat(asuint(r0.z) >> 8u);
+    r0.z = asfloat((asuint(r0.y) < asuint(r0.z)) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.z) & asuint(r0.x));
+    if (asuint(r0.x) != 0u)
+    {
+        r0.x = asfloat(g0_008[(uint(255) * 1u) + (uint(0) >> 2u)]);
+        _ScanSums[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.x).x;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void KReconScanSeq()
+{
+    float4 r0;
+    r0 = float4(0.0f.xx.x, 0.0f.xx.y, r0.z, r0.w);
+    for (;;)
+    {
+        r0.z = asfloat((asuint(r0.y) >= asuint(_ScanN)) ? 4294967295u : 0u);
+        if (asuint(r0.z) != 0u)
+        {
+            break;
+        }
+        r0.z = asfloat(_ScanIO[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+        _ScanIO[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.x).x;
+        r0.x = asfloat(asint(r0.z) + asint(r0.x));
+        r0.y = asfloat(asint(r0.y) + 1);
+        continue;
+    }
+    _ScanTotalOut[(uint(asint(_ScanTotalAt)) * 1u) + (uint(0) >> 2u)] = asuint(r0.x).x;
+    _RcSync[(uint(1) * 1u) + (uint(0) >> 2u)] = asuint(r0.x).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconScanApply(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_ScanN)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    r0.y = asfloat(asuint(r0.x) >> 8u);
+    r0.y = asfloat(_ScanAddR[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)].x);
+    r0.z = asfloat(_ScanIO[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+    r0.y = asfloat(asint(r0.y) + asint(r0.z));
+    _ScanIO[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconScatter(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_RcN)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    float4 r1;
+    r1.x = asfloat(_RcKeysR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
+    r0.y = asfloat((asint(r1.x) == (-1)) ? 4294967295u : 0u);
+    r0.z = asfloat((asuint(r1.x) >= asuint(_RcOcc)) ? 4294967295u : 0u);
+    r0.y = asfloat(asuint(r0.z) | asuint(r0.y));
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    r1.y = 0.0f;
+    uint _137;
+    InterlockedAdd(_RcSlotCnt[(uint(asint(r1.x)) * 1u) + (uint(asint(r1.y)) >> 2u)], 4294967295u, _137);
+    float4 r2;
+    r2.x = asfloat(_137);
+    r0.y = asfloat(_RcSlotStartR[(uint(asint(r1.x)) * 1u) + (uint(0) >> 2u)].x);
+    r0.y = asfloat(asint(r2.x) + asint(r0.y));
+    r0.y = asfloat(asint(r0.y) + (-1));
+    r0.z = asfloat((asint(r2.x) == 0) ? 4294967295u : 0u);
+    r0.w = asfloat((asuint(r0.y) >= asuint(_RcTotal)) ? 4294967295u : 0u);
+    r0.z = asfloat(asuint(r0.w) | asuint(r0.z));
+    if (asuint(r0.z) != 0u)
+    {
+        uint _204;
+        InterlockedOr(_RcSync[(uint(0) * 1u) + (uint(0) >> 2u)], 2u, _204);
+        return;
+    }
+    _RcOrder[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.x).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconSortCells(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_RcOcc)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    r0.y = asfloat(_RcSlotStartR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
+    r0.x = asfloat(asint(r0.x) + 1);
+    r0.x = asfloat(_RcSlotStartR[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)].x);
+    r0.x = asfloat((-asint(r0.y)) + asint(r0.x));
+    r0.z = _RcSortDesc;
+    r0.w = 1.4012984643248170709237295832899e-45f;
+    float4 r1;
+    float4 r2;
+    for (;;)
+    {
+        r1.x = asfloat((asuint(r0.w) >= asuint(r0.x)) ? 4294967295u : 0u);
+        if (asuint(r1.x) != 0u)
+        {
+            break;
+        }
+        r1.x = asfloat(asint(r0.w) + asint(r0.y));
+        r1.x = asfloat(_RcOrder[(uint(asint(r1.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+        if (asuint(r0.z) == 0u)
+        {
+            r1.y = r0.w;
+            for (;;)
+            {
+                r1.z = asfloat((0u < asuint(r1.y)) ? 4294967295u : 0u);
+                r1.w = asfloat(asint(r0.y) + asint(r1.y));
+                r2.x = asfloat(asint(r1.w) + (-1));
+                r2.x = asfloat(_RcOrder[(uint(asint(r2.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r2.y = asfloat((asuint(r1.x) < asuint(r2.x)) ? 4294967295u : 0u);
+                r1.z = asfloat(asuint(r1.z) & asuint(r2.y));
+                if (asuint(r1.z) == 0u)
+                {
+                    break;
+                }
+                _RcOrder[(uint(asint(r1.w)) * 1u) + (uint(0) >> 2u)] = asuint(r2.x).x;
+                r1.y = asfloat(asint(r1.y) + (-1));
+                continue;
+            }
+        }
+        else
+        {
+            r1.y = r0.w;
+            for (;;)
+            {
+                r1.z = asfloat((0u < asuint(r1.y)) ? 4294967295u : 0u);
+                r1.w = asfloat(asint(r0.y) + asint(r1.y));
+                r2.x = asfloat(asint(r1.w) + (-1));
+                r2.x = asfloat(_RcOrder[(uint(asint(r2.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r2.y = asfloat((asuint(r2.x) < asuint(r1.x)) ? 4294967295u : 0u);
+                r1.z = asfloat(asuint(r1.z) & asuint(r2.y));
+                if (asuint(r1.z) == 0u)
+                {
+                    break;
+                }
+                _RcOrder[(uint(asint(r1.w)) * 1u) + (uint(0) >> 2u)] = asuint(r2.x).x;
+                r1.y = asfloat(asint(r1.y) + (-1));
+                continue;
+            }
+        }
+        r1.z = asfloat(asint(r0.y) + asint(r1.y));
+        _RcOrder[(uint(asint(r1.z)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x).x;
+        r0.w = asfloat(asint(r0.w) + 1);
+        continue;
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KReconKeyDiag(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
+{
+    groupshared uint g0_013[1];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
+    if (uint(int(gl_LocalInvocationID.x)) == 0u)
+    {
+        g0_013[0u >> 2u] = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.y = asfloat(asint(r0.y) + asint(_DispOffset));
+    r0.z = asfloat((asuint(r0.y) < asuint(_RcN)) ? 4294967295u : 0u);
+    if (asuint(r0.z) != 0u)
+    {
+        r0.z = asfloat(_RcKeysR[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)].x);
+        r0.w = asfloat((asint(r0.z) != (-1)) ? 4294967295u : 0u);
+        if (asuint(r0.w) != 0u)
+        {
+            float4 r1;
+            r1.x = 0.0f;
+            r1.y = _RcNumBodies;
+            for (;;)
+            {
+                r0.w = asfloat((-asint(r1.x)) + asint(r1.y));
+                r0.w = asfloat((1u >= asuint(r0.w)) ? 4294967295u : 0u);
+                if (asuint(r0.w) != 0u)
+                {
+                    break;
+                }
+                r0.w = asfloat(asint(r1.y) + asint(r1.x));
+                r0.w = asfloat(asuint(r0.w) >> 1u);
+                r1.z = asfloat(_RcStartR[(uint(asint(r0.w)) * 1u) + (uint(0) >> 2u)].x);
+                r1.z = asfloat((asuint(r0.y) >= asuint(r1.z)) ? 4294967295u : 0u);
+                r1.x = (asuint(r1.z) != 0u) ? r0.w : r1.x;
+                r1.y = (asuint(r1.z) != 0u) ? r1.y : r0.w;
+                continue;
+            }
+            uint _224 = (uint(asint(r1.x)) * 20u) + (uint(64) >> 2u);
+            float2 _233 = asfloat(uint2(_RcBodyR[_224].x, _RcBodyR[_224 + 1u].x));
+            r1 = float4(r1.x, _233.x, _233.y, r1.w);
+            r0.w = asfloat((asint(r0.y) >= asint(r1.y)) ? 4294967295u : 0u);
+            r1.y = asfloat(asint(r1.z) + asint(r1.y));
+            r1.y = asfloat((asint(r0.y) < asint(r1.y)) ? 4294967295u : 0u);
+            r0.w = asfloat(asuint(r0.w) & asuint(r1.y));
+            r0.w = (asuint(r0.w) != 0u) ? r1.x : asfloat(0xffffffffu /* nan */);
+            r1.x = asfloat((asint(r0.w) >= 0) ? 4294967295u : 0u);
+            if (asuint(r1.x) != 0u)
+            {
+                uint _302 = (uint(asint(r0.w)) * 20u) + (uint(0) >> 2u);
+                r1 = asfloat(uint4(_RcBodyR[_302].x, _RcBodyR[_302 + 1u].x, _RcBodyR[_302 + 2u].x, _RcBodyR[_302 + 3u].x));
+                uint _323 = (uint(asint(r0.w)) * 20u) + (uint(16) >> 2u);
+                float4 r2 = asfloat(uint4(_RcBodyR[_323].x, _RcBodyR[_323 + 1u].x, _RcBodyR[_323 + 2u].x, _RcBodyR[_323 + 3u].x));
+                uint _344 = (uint(asint(r0.w)) * 20u) + (uint(32) >> 2u);
+                float2 _351 = asfloat(uint2(_RcBodyR[_344].x, _RcBodyR[_344 + 1u].x));
+                float4 r3;
+                r3 = float4(_351.x, _351.y, r3.z, r3.w);
+                uint _360 = (uint(asint(r0.y)) * 3u) + (uint(0) >> 2u);
+                float3 _372 = asfloat(uint3(_RcPosR[_360].x, _RcPosR[_360 + 1u].x, _RcPosR[_360 + 2u].x));
+                float4 r4;
+                r4 = float4(_372.x, _372.y, _372.z, r4.w);
+                float3 _380 = (-r1.xyz) + r4.xyz;
+                r1 = float4(_380.x, _380.y, _380.z, r1.w);
+                float3 _387 = r1.xyz / r1.www;
+                r1 = float4(_387.x, _387.y, _387.z, r1.w);
+                float3 _393 = asfloat(int3(r1.xyz));
+                r1 = float4(_393.x, _393.y, _393.z, r1.w);
+                float3 _401 = asfloat(asint(r2.xyz) + int3(-1, -1, -1));
+                r2 = float4(_401.x, _401.y, _401.z, r2.w);
+                float3 _410 = asfloat(max(asint(r1.xyz), int3(0, 0, 0)));
+                r1 = float4(_410.x, _410.y, _410.z, r1.w);
+                float3 _420 = asfloat(min(asint(r2.xyz), asint(r1.xyz)));
+                r1 = float4(_420.x, _420.y, _420.z, r1.w);
+                float3 _429 = asfloat(asint(r1.xyz) >> int3(3, 3, 3));
+                r2 = float4(_429.x, _429.y, _429.z, r2.w);
+                r0.y = asfloat(asint(r3.x) * asint(r2.z));
+                r0.w = asfloat((asint(r2.y) * asint(r3.x)) + asint(r2.x));
+                r0.y = asfloat((asint(r0.y) * asint(r3.y)) + asint(r0.w));
+                r0.y = asfloat(asint(r0.y) + asint(r2.w));
+                r0.y = asfloat(_RcBrickR[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)].x);
+                r0.w = asfloat((asint(r0.y) < 0) ? 4294967295u : 0u);
+                float2 _509 = asfloat(uint2(spvBitfieldInsert(0u, asuint(r1.y), 3u & 31u, 3u & 31u), spvBitfieldInsert(0u, asuint(r1.z), 6u & 31u, 3u & 31u)));
+                r1 = float4(r1.x, _509.x, _509.y, r1.w);
+                r1.x = asfloat(spvBitfieldInsert(asuint(r1.y), asuint(r1.x), 0u & 31u, 3u & 31u));
+                r1.x = asfloat(asint(r1.z) + asint(r1.x));
+                r0.y = asfloat(spvBitfieldInsert(asuint(r1.x), asuint(r0.y), 9u & 31u, 23u & 31u));
+                r0.y = (asuint(r0.w) != 0u) ? asfloat(0xffffffffu /* nan */) : r0.y;
+                r0.y = asfloat((asint(r0.z) == asint(r0.y)) ? 4294967295u : 0u);
+                r0.y = (asuint(r0.y) != 0u) ? 0.0f : 1.4012984643248170709237295832899e-45f;
+            }
+            else
+            {
+                r0.y = 1.4012984643248170709237295832899e-45f;
+            }
+            if (asuint(r0.y) != 0u)
+            {
+                uint _580;
+                InterlockedAdd(g0_013[uint(0) >> 2u], 1u, _580);
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat(g0_013[uint(0) >> 2u]);
+    r0.z = asfloat((asint(r0.y) != 0) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.z) & asuint(r0.x));
+    if (asuint(r0.x) != 0u)
+    {
+        uint _617;
+        InterlockedAdd(_RcSync[(uint(2) * 1u) + (uint(0) >> 2u)], asuint(r0.y), _617);
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KReconNodeDiag(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
+{
+    groupshared uint g0_014[1];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
+    if (uint(int(gl_LocalInvocationID.x)) == 0u)
+    {
+        g0_014[0u >> 2u] = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.y = asfloat(asint(r0.y) + asint(_DispOffset));
+    r0.z = asfloat((asuint(r0.y) < asuint(_RcNodes)) ? 4294967295u : 0u);
+    if (asuint(r0.z) != 0u)
+    {
+        r0.z = 0.0f;
+        r0.w = _RcNumBodies;
+        float4 r1;
+        for (;;)
+        {
+            r1.x = asfloat((-asint(r0.z)) + asint(r0.w));
+            r1.x = asfloat((1u >= asuint(r1.x)) ? 4294967295u : 0u);
+            if (asuint(r1.x) != 0u)
+            {
+                break;
+            }
+            r1.x = asfloat(asint(r0.w) + asint(r0.z));
+            r1.x = asfloat(asuint(r1.x) >> 1u);
+            r1.y = asfloat(_RcBodyR[(uint(asint(r1.x)) * 20u) + (uint(60) >> 2u)].x);
+            r1.y = asfloat((asuint(r0.y) >= asuint(r1.y)) ? 4294967295u : 0u);
+            r0.z = (asuint(r1.y) != 0u) ? r1.x : r0.z;
+            r0.w = (asuint(r1.y) != 0u) ? r0.w : r1.x;
+            continue;
+        }
+        uint _196 = (uint(asint(r0.z)) * 20u) + (uint(48) >> 2u);
+        r1 = asfloat(uint4(_RcBodyR[_196].x, _RcBodyR[_196 + 1u].x, _RcBodyR[_196 + 2u].x, _RcBodyR[_196 + 3u].x));
+        r0.w = asfloat(_RcBodyR[(uint(asint(r0.z)) * 20u) + (uint(76) >> 2u)].x);
+        r0.w = asfloat(asuint(r0.w) & 1u);
+        r1.y = asfloat(asint(r1.y) + asint(r1.x));
+        r1.z = asfloat(asint(r1.z) + asint(r1.y));
+        r0.w = (asuint(r0.w) != 0u) ? r1.z : 0.0f;
+        r1.z = asfloat((asuint(r0.y) >= asuint(r1.w)) ? 4294967295u : 0u);
+        r0.w = asfloat(asint(r0.w) + asint(r1.w));
+        r0.w = asfloat((asuint(r0.y) < asuint(r0.w)) ? 4294967295u : 0u);
+        r0.w = asfloat(asuint(r0.w) & asuint(r1.z));
+        if (asuint(r0.w) != 0u)
+        {
+            uint _304 = (uint(asint(r0.z)) * 20u) + (uint(0) >> 2u);
+            float4 r2 = asfloat(uint4(_RcBodyR[_304].x, _RcBodyR[_304 + 1u].x, _RcBodyR[_304 + 2u].x, _RcBodyR[_304 + 3u].x));
+            uint _325 = (uint(asint(r0.z)) * 20u) + (uint(16) >> 2u);
+            float3 _337 = asfloat(uint3(_RcBodyR[_325].x, _RcBodyR[_325 + 1u].x, _RcBodyR[_325 + 2u].x));
+            float4 r3;
+            r3 = float4(_337.x, _337.y, _337.z, r3.w);
+            r0.z = asfloat(asint(r0.y) + (-asint(r1.w)));
+            uint _356 = (uint(asint(r0.y)) * 2u) + (uint(0) >> 2u);
+            float2 _365 = asfloat(uint2(_RcNodeR[_356].x, _RcNodeR[_356 + 1u].x));
+            r0 = float4(r0.x, _365.x, r0.z, _365.y);
+            r1.x = asfloat((asint(r0.z) < asint(r1.x)) ? 4294967295u : 0u);
+            float3 _383 = (-r2.xyz) + r0.www;
+            r2 = float4(_383.x, _383.y, _383.z, r2.w);
+            float3 _390 = r2.xyz / r2.www;
+            r2 = float4(_390.x, _390.y, _390.z, r2.w);
+            float3 _396 = asfloat(int3(r2.xyz));
+            r2 = float4(_396.x, _396.y, _396.z, r2.w);
+            float3 _405 = asfloat(asint(r3.xyz) + int3(-1, -1, -1));
+            r3 = float4(_405.x, _405.y, _405.z, r3.w);
+            float3 _414 = asfloat(max(asint(r2.xyz), int3(0, 0, 0)));
+            r2 = float4(_414.x, _414.y, _414.z, r2.w);
+            r0.z = asfloat((asint(r0.z) < asint(r1.y)) ? 4294967295u : 0u);
+            float3 _434 = asfloat(min(asint(r3.xyz), asint(r2.xyz)));
+            r1 = float4(r1.x, _434.x, _434.y, _434.z);
+            r0.z = (asuint(r0.z) != 0u) ? r1.z : r1.w;
+            r0.z = (asuint(r1.x) != 0u) ? r1.y : r0.z;
+            r0.y = asfloat((asint(r0.y) != asint(r0.z)) ? 4294967295u : 0u);
+            if (asuint(r0.y) != 0u)
+            {
+                uint _475;
+                InterlockedAdd(g0_014[uint(0) >> 2u], 1u, _475);
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat(g0_014[uint(0) >> 2u]);
+    r0.z = asfloat((asint(r0.y) != 0) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.z) & asuint(r0.x));
+    if (asuint(r0.x) != 0u)
+    {
+        uint _512;
+        InterlockedAdd(_RcSync[(uint(3) * 1u) + (uint(0) >> 2u)], asuint(r0.y), _512);
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KReconBlockClear(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_RcBlockTotal)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    _RcMaskOut[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+    _RcMaskOut1[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+    _RcBlock[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+    r0.y = asfloat(asint(r0.x) + asint(_RcBlockTotal));
+    _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+    float2 _126 = asfloat(asint(int2(_RcBlockTotal)) << int2(1, 2));
+    r0 = float4(r0.x, _126.x, _126.y, r0.w);
+    float2 _136 = asfloat(asint(r0.xx) + asint(r0.yz));
+    r0 = float4(r0.x, _136.x, _136.y, r0.w);
+    _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+    r0.x = asfloat((3 * asint(_RcBlockTotal)) + asint(r0.x));
+    _RcBlock[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+    _RcBlock[(uint(asint(r0.z)) * 1u) + (uint(0) >> 2u)] = uint4(0u, 0u, 0u, 0u).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconExtentClear(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat(asint(_RcNumBodies) * 6);
+    r0.y = asfloat((asuint(r0.x) >= asuint(r0.y)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    r0.y = asfloat(asuint(r0.x) & 1u);
+    r0.y = (asuint(r0.y) != 0u) ? asfloat(0xffffffffu /* nan */) : asfloat(0x7fffffffu /* nan */);
+    _RcExtent[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+}
+
+[numthreads(256, 1, 1)]
+void KReconBlockSample(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
+{
+    groupshared uint g0_017[1];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
+    if (uint(int(gl_LocalInvocationID.x)) == 0u)
+    {
+        g0_017[0u >> 2u] = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.y = asfloat(asint(r0.y) + asint(_DispOffset));
+    r0.z = asfloat((asuint(r0.y) < asuint(_RcBlockTotal)) ? 4294967295u : 0u);
+    if (asuint(r0.z) != 0u)
+    {
+        r0.z = 0.0f;
+        r0.w = _RcNumBodies;
+        float4 r1;
+        for (;;)
+        {
+            r1.x = asfloat((-asint(r0.z)) + asint(r0.w));
+            r1.x = asfloat((1u >= asuint(r1.x)) ? 4294967295u : 0u);
+            if (asuint(r1.x) != 0u)
+            {
+                break;
+            }
+            r1.x = asfloat(asint(r0.w) + asint(r0.z));
+            r1.x = asfloat(asuint(r1.x) >> 1u);
+            r1.y = asfloat(_RcBlockBaseR[(uint(asint(r1.x)) * 1u) + (uint(0) >> 2u)].x);
+            r1.y = asfloat((asuint(r0.y) >= asuint(r1.y)) ? 4294967295u : 0u);
+            r0.z = (asuint(r1.y) != 0u) ? r1.x : r0.z;
+            r0.w = (asuint(r1.y) != 0u) ? r0.w : r1.x;
+            continue;
+        }
+        uint _218 = (uint(asint(r0.z)) * 20u) + (uint(44) >> 2u);
+        r1 = asfloat(uint4(_RcBodyR[_218].x, _RcBodyR[_218 + 1u].x, _RcBodyR[_218 + 2u].x, _RcBodyR[_218 + 3u].x));
+        float4 r2;
+        r2.x = asfloat(_RcBodyR[(uint(asint(r0.z)) * 20u) + (uint(76) >> 2u)].x);
+        r2.x = asfloat(asuint(r2.x) & 1u);
+        r1.y = asfloat(asint(r1.z) * asint(r1.y));
+        r1.y = asfloat(asint(r1.w) * asint(r1.y));
+        r1.y = (asuint(r2.x) != 0u) ? r1.y : 0.0f;
+        r1.z = asfloat((asuint(r0.y) >= asuint(r1.x)) ? 4294967295u : 0u);
+        r1.y = asfloat(asint(r1.y) + asint(r1.x));
+        r1.y = asfloat((asuint(r0.y) < asuint(r1.y)) ? 4294967295u : 0u);
+        r1.y = asfloat(asuint(r1.y) & asuint(r1.z));
+        r0.w = asfloat(asint(r0.y) + (-asint(r1.x)));
+        uint2 _328 = asuint(r1.yy);
+        bool2 _335 = bool2(_328.x != uint2(0u, 0u).x, _328.y != uint2(0u, 0u).y);
+        float2 _336 = float2(_335.x ? r0.wz.x : float2(0.0f, asfloat(0xffffffffu /* nan */)).x, _335.y ? r0.wz.y : float2(0.0f, asfloat(0xffffffffu /* nan */)).y);
+        r0 = float4(r0.x, r0.y, _336.x, _336.y);
+        r1.x = asfloat((asint(r0.w) < 0) ? 4294967295u : 0u);
+        if (asuint(r1.x) != 0u)
+        {
+            uint _358;
+            InterlockedOr(_RcSync[(uint(0) * 1u) + (uint(0) >> 2u)], 4u, _358);
+        }
+        else
+        {
+            uint _367 = (uint(asint(r0.w)) * 20u) + (uint(12) >> 2u);
+            r1 = asfloat(uint4(_RcBodyR[_367].x, _RcBodyR[_367 + 1u].x, _RcBodyR[_367 + 2u].x, _RcBodyR[_367 + 3u].x));
+            uint _388 = (uint(asint(r0.w)) * 20u) + (uint(28) >> 2u);
+            float3 _400 = asfloat(uint3(_RcBodyR[_388].x, _RcBodyR[_388 + 1u].x, _RcBodyR[_388 + 2u].x));
+            r2 = float4(_400.x, _400.y, _400.z, r2.w);
+            uint _410 = (uint(asint(r0.w)) * 20u) + (uint(48) >> 2u);
+            float2 _417 = asfloat(uint2(_RcBodyR[_410].x, _RcBodyR[_410 + 1u].x));
+            float4 r3;
+            r3 = float4(_417.x, _417.y, r3.z, r3.w);
+            r2.w = asfloat(_RcBodyR[(uint(asint(r0.w)) * 20u) + (uint(60) >> 2u)].x);
+            uint _434 = asuint(r0.z);
+            uint _437 = asuint(r3.x);
+            bool _438 = _437 != 0u;
+            float4 r4;
+            r4.x = asfloat(_438 ? (_434 / _437) : 4294967295u);
+            float4 r5;
+            r5.x = asfloat(_438 ? (_434 % _437) : 4294967295u);
+            uint _452 = asuint(r3.y);
+            r3.z = asfloat((_452 != 0u) ? (asuint(r4.x) % _452) : 4294967295u);
+            r3.w = asfloat(asint(r3.y) * asint(r3.x));
+            uint _472 = asuint(r3.w);
+            r0.z = asfloat((_472 != 0u) ? (asuint(r0.z) / _472) : 4294967295u);
+            r3.w = asfloat(asint(r2.w) + asint(r5.x));
+            uint _493 = (uint(asint(r3.w)) * 2u) + (uint(0) >> 2u);
+            float2 _500 = asfloat(uint2(_RcNodeR[_493].x, _RcNodeR[_493 + 1u].x));
+            r4 = float4(_500.x, _500.y, r4.z, r4.w);
+            r2.w = asfloat(asint(r3.x) + asint(r2.w));
+            r3.x = asfloat(asint(r3.z) + asint(r2.w));
+            uint _527 = (uint(asint(r3.x)) * 2u) + (uint(0) >> 2u);
+            float2 _534 = asfloat(uint2(_RcNodeR[_527].x, _RcNodeR[_527 + 1u].x));
+            r3 = float4(_534.x, r3.y, r3.z, _534.y);
+            r2.w = asfloat(asint(r3.y) + asint(r2.w));
+            r2.w = asfloat(asint(r0.z) + asint(r2.w));
+            uint _561 = (uint(asint(r2.w)) * 2u) + (uint(0) >> 2u);
+            float2 _568 = asfloat(uint2(_RcNodeR[_561].x, _RcNodeR[_561 + 1u].x));
+            r4 = float4(r4.x, r4.y, _568.x, _568.y);
+            r2.w = 0.0f;
+            r3.y = asfloat(0xfffffffeu /* nan */);
+            r5.y = 0.0f;
+            float4 r6;
+            float4 r7;
+            float4 r8;
+            float4 r9;
+            float4 r10;
+            for (;;)
+            {
+                r5.z = asfloat((2 < asint(r3.y)) ? 4294967295u : 0u);
+                r5.y = 0.0f;
+                if (asuint(r5.z) != 0u)
+                {
+                    break;
+                }
+                r5.z = asfloat(asint(r3.y) + asint(r4.z));
+                r5.w = asfloat((asint(r5.z) < 0) ? 4294967295u : 0u);
+                r6.x = asfloat((asint(r5.z) >= asint(r1.w)) ? 4294967295u : 0u);
+                r6.y = asfloat(asint(r5.z) >> 3);
+                r6.y = asfloat(asint(r2.y) * asint(r6.y));
+                r5.z = asfloat(spvBitfieldInsert(0u, asuint(r5.z), 6u & 31u, 3u & 31u));
+                r6.z = r2.w;
+                r6.w = asfloat(0xfffffffeu /* nan */);
+                r7.x = 0.0f;
+                for (;;)
+                {
+                    r7.y = asfloat((2 < asint(r6.w)) ? 4294967295u : 0u);
+                    r7.x = 0.0f;
+                    if (asuint(r7.y) != 0u)
+                    {
+                        break;
+                    }
+                    r7.y = asfloat(asint(r3.x) + asint(r6.w));
+                    r7.z = asfloat((asint(r7.y) < 0) ? 4294967295u : 0u);
+                    r7.w = asfloat((asint(r7.y) >= asint(r1.z)) ? 4294967295u : 0u);
+                    r8.x = asfloat(asint(r7.y) >> 3);
+                    r7.y = asfloat(spvBitfieldInsert(0u, asuint(r7.y), 3u & 31u, 3u & 31u));
+                    r8.y = r6.z;
+                    r8 = float4(r8.x, r8.y, float2(asfloat(0xfffffffeu /* nan */), 0.0f).x, float2(asfloat(0xfffffffeu /* nan */), 0.0f).y);
+                    for (;;)
+                    {
+                        r9.x = asfloat((2 < asint(r8.z)) ? 4294967295u : 0u);
+                        r8.w = 0.0f;
+                        if (asuint(r9.x) != 0u)
+                        {
+                            break;
+                        }
+                        r9.x = asfloat(asint(r4.x) + asint(r8.z));
+                        r9.y = asfloat((asint(r9.x) < 0) ? 4294967295u : 0u);
+                        r9.y = asfloat(asuint(r7.z) | asuint(r9.y));
+                        r9.y = asfloat(asuint(r5.w) | asuint(r9.y));
+                        r9.z = asfloat((asint(r9.x) >= asint(r1.y)) ? 4294967295u : 0u);
+                        r9.y = asfloat(asuint(r9.z) | asuint(r9.y));
+                        r9.y = asfloat(asuint(r7.w) | asuint(r9.y));
+                        r9.y = asfloat(asuint(r6.x) | asuint(r9.y));
+                        if (asuint(r9.y) != 0u)
+                        {
+                            r9.y = asfloat(asint(r8.z) + 1);
+                            r8.w = 0.0f;
+                            r8.z = r9.y;
+                            continue;
+                        }
+                        r9.y = asfloat(asint(r9.x) >> 3);
+                        r9.y = asfloat((asint(r8.x) * asint(r2.y)) + asint(r9.y));
+                        r9.y = asfloat((asint(r6.y) * asint(r2.z)) + asint(r9.y));
+                        r9.y = asfloat(asint(r2.x) + asint(r9.y));
+                        r9.y = asfloat(_RcBrickR[(uint(asint(r9.y)) * 1u) + (uint(0) >> 2u)].x);
+                        r9.z = asfloat((asint(r9.y) >= 0) ? 4294967295u : 0u);
+                        r9.x = asfloat(spvBitfieldInsert(asuint(r7.y), asuint(r9.x), 0u & 31u, 3u & 31u));
+                        r9.x = asfloat(asint(r5.z) + asint(r9.x));
+                        r9.x = asfloat(spvBitfieldInsert(asuint(r9.x), asuint(r9.y), 9u & 31u, 23u & 31u));
+                        r10.x = asfloat(_RcSlotStartR[(uint(asint(r9.x)) * 1u) + (uint(0) >> 2u)].x);
+                        r9.x = asfloat(asint(r9.x) + 1);
+                        r10.y = asfloat(_RcSlotStartR[(uint(asint(r9.x)) * 1u) + (uint(0) >> 2u)].x);
+                        float2 _944 = asfloat(asuint(r9.zz) & asuint(r10.xy));
+                        r9 = float4(_944.x, _944.y, r9.z, r9.w);
+                        r9.x = asfloat((asuint(r9.x) < asuint(r9.y)) ? 4294967295u : 0u);
+                        if (asuint(r9.x) != 0u)
+                        {
+                            r8 = float4(r8.x, asfloat(0xffffffffu /* nan */).xx.x, r8.z, asfloat(0xffffffffu /* nan */).xx.y);
+                            break;
+                        }
+                        r8.w = r9.x;
+                        r8.z = asfloat(asint(r8.z) + 1);
+                        continue;
+                    }
+                    r6.z = r8.y;
+                    r7.x = r8.w;
+                    if (asuint(r8.w) != 0u)
+                    {
+                        break;
+                    }
+                    r6.w = asfloat(asint(r6.w) + 1);
+                    r6.z = r8.y;
+                    r7.x = r8.w;
+                    continue;
+                }
+                r2.w = r6.z;
+                r5.y = r7.x;
+                if (asuint(r7.x) != 0u)
+                {
+                    break;
+                }
+                r3.y = asfloat(asint(r3.y) + 1);
+                r2.w = r6.z;
+                r5.y = r7.x;
+                continue;
+            }
+            r2.w = asfloat(asuint(r2.w) & asuint(r5.y));
+            if (asuint(r2.w) != 0u)
+            {
+                _RcMaskOut[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = uint4(1u, 1u, 1u, 1u).x;
+                r6.x = asfloat(asint(r0.w) * 6);
+                r2.w = asfloat(_RcExtent[(uint(asint(r6.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r2.w = asfloat((asint(r5.x) < asint(r2.w)) ? 4294967295u : 0u);
+                if (asuint(r2.w) != 0u)
+                {
+                    r6.y = 0.0f;
+                    uint _1092;
+                    InterlockedMin(_RcExtent[(uint(asint(r6.x)) * 1u) + (uint(asint(r6.y)) >> 2u)], asuint(r5.x), _1092);
+                }
+                r6.x = asfloat((asint(r0.w) * 6) + 1);
+                r2.w = asfloat(_RcExtent[(uint(asint(r6.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r2.w = asfloat((asint(r2.w) < asint(r5.x)) ? 4294967295u : 0u);
+                if (asuint(r2.w) != 0u)
+                {
+                    r6.y = 0.0f;
+                    uint _1141;
+                    InterlockedMax(_RcExtent[(uint(asint(r6.x)) * 1u) + (uint(asint(r6.y)) >> 2u)], asuint(r5.x), _1141);
+                }
+                r5 = asfloat((asint(r0.wwww) * int4(6, 6, 6, 6)) + int4(3, 2, 4, 5));
+                r0.w = asfloat(_RcExtent[(uint(asint(r5.y)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r0.w = asfloat((asint(r3.z) < asint(r0.w)) ? 4294967295u : 0u);
+                if (asuint(r0.w) != 0u)
+                {
+                    r6.x = r5.y;
+                    r6.y = 0.0f;
+                    uint _1197;
+                    InterlockedMin(_RcExtent[(uint(asint(r6.x)) * 1u) + (uint(asint(r6.y)) >> 2u)], asuint(r3.z), _1197);
+                }
+                r0.w = asfloat(_RcExtent[(uint(asint(r5.x)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r0.w = asfloat((asint(r0.w) < asint(r3.z)) ? 4294967295u : 0u);
+                if (asuint(r0.w) != 0u)
+                {
+                    r5.y = 0.0f;
+                    uint _1239;
+                    InterlockedMax(_RcExtent[(uint(asint(r5.x)) * 1u) + (uint(asint(r5.y)) >> 2u)], asuint(r3.z), _1239);
+                }
+                r0.w = asfloat(_RcExtent[(uint(asint(r5.z)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r0.w = asfloat((asint(r0.z) < asint(r0.w)) ? 4294967295u : 0u);
+                if (asuint(r0.w) != 0u)
+                {
+                    r5.y = 0.0f;
+                    uint _1281;
+                    InterlockedMin(_RcExtent[(uint(asint(r5.z)) * 1u) + (uint(asint(r5.y)) >> 2u)], asuint(r0.z), _1281);
+                }
+                r0.w = asfloat(_RcExtent[(uint(asint(r5.w)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                r0.w = asfloat((asint(r0.w) < asint(r0.z)) ? 4294967295u : 0u);
+                if (asuint(r0.w) != 0u)
+                {
+                    r5.y = 0.0f;
+                    uint _1323;
+                    InterlockedMax(_RcExtent[(uint(asint(r5.w)) * 1u) + (uint(asint(r5.y)) >> 2u)], asuint(r0.z), _1323);
+                }
+                r0.z = asfloat((asint(_RcMutTap) != 0) ? 4294967295u : 0u);
+                float2 _1340 = asfloat(asint(int2(_RcN)) << int2(1, 2));
+                r3 = float4(r3.x, _1340.x, _1340.y, r3.w);
+                r5 = 0.0f.xxxx;
+                r0.w = 0.0f;
+                r2.w = 0.0f;
+                r6.x = asfloat(0xfffffffeu /* nan */);
+                float4 r11;
+                float4 r12;
+                float4 r13;
+                float4 r14;
+                float4 r15;
+                float4 r16;
+                for (;;)
+                {
+                    r6.y = asfloat((2 < asint(r6.x)) ? 4294967295u : 0u);
+                    if (asuint(r6.y) != 0u)
+                    {
+                        break;
+                    }
+                    r6.y = asfloat(asint(r4.z) + asint(r6.x));
+                    r6.z = asfloat((asint(r6.y) < 0) ? 4294967295u : 0u);
+                    r6.w = asfloat((asint(r6.y) >= asint(r1.w)) ? 4294967295u : 0u);
+                    r7.x = asfloat(asint(r6.y) >> 3);
+                    r7.x = asfloat(asint(r2.y) * asint(r7.x));
+                    r6.y = asfloat(spvBitfieldInsert(0u, asuint(r6.y), 6u & 31u, 3u & 31u));
+                    r8 = r5;
+                    r7.y = r0.w;
+                    r7.z = r2.w;
+                    r7.w = asfloat(0xfffffffeu /* nan */);
+                    for (;;)
+                    {
+                        r9.x = asfloat((2 < asint(r7.w)) ? 4294967295u : 0u);
+                        if (asuint(r9.x) != 0u)
+                        {
+                            break;
+                        }
+                        r9.x = asfloat(asint(r3.x) + asint(r7.w));
+                        r9.y = asfloat((asint(r9.x) < 0) ? 4294967295u : 0u);
+                        r9.z = asfloat((asint(r9.x) >= asint(r1.z)) ? 4294967295u : 0u);
+                        r9.w = asfloat(asint(r9.x) >> 3);
+                        r9.x = asfloat(spvBitfieldInsert(0u, asuint(r9.x), 3u & 31u, 3u & 31u));
+                        r10 = r8;
+                        r11 = float4(r7.y, r7.z, r11.z, r11.w);
+                        r11.z = asfloat(0xfffffffeu /* nan */);
+                        for (;;)
+                        {
+                            r11.w = asfloat((2 < asint(r11.z)) ? 4294967295u : 0u);
+                            if (asuint(r11.w) != 0u)
+                            {
+                                break;
+                            }
+                            r11.w = asfloat((asint(r11.z) == 2) ? 4294967295u : 0u);
+                            r11.w = asfloat(asuint(r0.z) & asuint(r11.w));
+                            if (asuint(r11.w) != 0u)
+                            {
+                                r11 = float4(r11.x, r11.y, 4.2038953929744512127711887498697e-45f.xx.x, 4.2038953929744512127711887498697e-45f.xx.y);
+                                continue;
+                            }
+                            else
+                            {
+                                r11.w = r11.z;
+                            }
+                            r12.x = asfloat(asint(r4.x) + asint(r11.w));
+                            r12.y = asfloat((asint(r12.x) < 0) ? 4294967295u : 0u);
+                            r12.y = asfloat(asuint(r9.y) | asuint(r12.y));
+                            r12.y = asfloat(asuint(r6.z) | asuint(r12.y));
+                            r12.z = asfloat((asint(r12.x) >= asint(r1.y)) ? 4294967295u : 0u);
+                            r12.y = asfloat(asuint(r12.z) | asuint(r12.y));
+                            r12.y = asfloat(asuint(r9.z) | asuint(r12.y));
+                            r12.y = asfloat(asuint(r6.w) | asuint(r12.y));
+                            if (asuint(r12.y) != 0u)
+                            {
+                                r11.z = asfloat(asint(r11.w) + 1);
+                                continue;
+                            }
+                            r12.y = asfloat(asint(r12.x) >> 3);
+                            r12.y = asfloat((asint(r9.w) * asint(r2.y)) + asint(r12.y));
+                            r12.y = asfloat((asint(r7.x) * asint(r2.z)) + asint(r12.y));
+                            r12.y = asfloat(asint(r2.x) + asint(r12.y));
+                            r12.y = asfloat(_RcBrickR[(uint(asint(r12.y)) * 1u) + (uint(0) >> 2u)].x);
+                            r12.z = asfloat((asint(r12.y) >= 0) ? 4294967295u : 0u);
+                            r12.x = asfloat(spvBitfieldInsert(asuint(r9.x), asuint(r12.x), 0u & 31u, 3u & 31u));
+                            r12.x = asfloat(asint(r6.y) + asint(r12.x));
+                            r12.x = asfloat(spvBitfieldInsert(asuint(r12.x), asuint(r12.y), 9u & 31u, 23u & 31u));
+                            r13.x = asfloat(_RcSlotStartR[(uint(asint(r12.x)) * 1u) + (uint(0) >> 2u)].x);
+                            r12.x = asfloat(asint(r12.x) + 1);
+                            r13.y = asfloat(_RcSlotStartR[(uint(asint(r12.x)) * 1u) + (uint(0) >> 2u)].x);
+                            float2 _1733 = asfloat(asuint(r12.zz) & asuint(r13.xy));
+                            r12 = float4(_1733.x, _1733.y, r12.z, r12.w);
+                            r13 = r10;
+                            r12 = float4(r12.x, r12.y, r11.x, r11.y);
+                            r14.x = r12.x;
+                            for (;;)
+                            {
+                                r14.y = asfloat((asuint(r14.x) >= asuint(r12.y)) ? 4294967295u : 0u);
+                                if (asuint(r14.y) != 0u)
+                                {
+                                    break;
+                                }
+                                r14.y = asfloat(_RcOrderR[(uint(asint(r14.x)) * 1u) + (uint(0) >> 2u)].x);
+                                uint _1778 = (uint(asint(r14.y)) * 3u) + (uint(0) >> 2u);
+                                float3 _1788 = asfloat(uint3(_RcPosR[_1778].x, _RcPosR[_1778 + 1u].x, _RcPosR[_1778 + 2u].x));
+                                r15 = float4(_1788.x, _1788.y, _1788.z, r15.w);
+                                r14.z = (-r4.y) + r15.x;
+                                r14.w = (-r3.w) + r15.y;
+                                r15.x = (-r4.w) + r15.z;
+                                float2 _1816 = r14.zw / r1.xx;
+                                r14 = float4(r14.x, r14.y, _1816.x, _1816.y);
+                                r15.y = abs(r14.z) * abs(r14.z);
+                                r15.y = (-r15.y) + 0.75f;
+                                float2 _1836 = abs(r14.zz);
+                                bool2 _1840 = bool2(_1836.x < float2(0.5f, 1.5f).x, _1836.y < float2(0.5f, 1.5f).y);
+                                float2 _1843 = asfloat(uint2(_1840.x ? uint2(4294967295u, 4294967295u).x : uint2(0u, 0u).x, _1840.y ? uint2(4294967295u, 4294967295u).y : uint2(0u, 0u).y));
+                                r15 = float4(r15.x, r15.y, _1843.x, _1843.y);
+                                r14.z = (-abs(r14.z)) + 1.5f;
+                                r16.x = r14.z * 0.5f;
+                                r14.z *= r16.x;
+                                r14.z = asfloat(asuint(r14.z) & asuint(r15.w));
+                                r14.z = (asuint(r15.z) != 0u) ? r15.y : r14.z;
+                                r15.y = abs(r14.w) * abs(r14.w);
+                                r15.y = (-r15.y) + 0.75f;
+                                float2 _1896 = abs(r14.ww);
+                                bool2 _1897 = bool2(_1896.x < float2(0.5f, 1.5f).x, _1896.y < float2(0.5f, 1.5f).y);
+                                float2 _1899 = asfloat(uint2(_1897.x ? uint2(4294967295u, 4294967295u).x : uint2(0u, 0u).x, _1897.y ? uint2(4294967295u, 4294967295u).y : uint2(0u, 0u).y));
+                                r15 = float4(r15.x, r15.y, _1899.x, _1899.y);
+                                r14.w = (-abs(r14.w)) + 1.5f;
+                                r16.x = r14.w * 0.5f;
+                                r14.w *= r16.x;
+                                r14.w = asfloat(asuint(r14.w) & asuint(r15.w));
+                                r14.w = (asuint(r15.z) != 0u) ? r15.y : r14.w;
+                                r14.z = r14.w * r14.z;
+                                r14.w = r15.x / r1.x;
+                                r15.x = abs(r14.w) * abs(r14.w);
+                                r15.x = (-r15.x) + 0.75f;
+                                float2 _1964 = abs(r14.ww);
+                                bool2 _1965 = bool2(_1964.x < float2(0.5f, 1.5f).x, _1964.y < float2(0.5f, 1.5f).y);
+                                float2 _1967 = asfloat(uint2(_1965.x ? uint2(4294967295u, 4294967295u).x : uint2(0u, 0u).x, _1965.y ? uint2(4294967295u, 4294967295u).y : uint2(0u, 0u).y));
+                                r15 = float4(r15.x, _1967.x, _1967.y, r15.w);
+                                r14.w = (-abs(r14.w)) + 1.5f;
+                                r15.w = r14.w * 0.5f;
+                                r14.w *= r15.w;
+                                r14.w = asfloat(asuint(r14.w) & asuint(r15.z));
+                                r14.w = (asuint(r15.y) != 0u) ? r15.x : r14.w;
+                                r14.z = r14.w * r14.z;
+                                r14.w = asfloat((0.0f >= r14.z) ? 4294967295u : 0u);
+                                if (asuint(r14.w) != 0u)
+                                {
+                                    r14.w = asfloat(asint(r14.x) + 1);
+                                    r14.x = r14.w;
+                                    continue;
+                                }
+                                r12.w += r14.z;
+                                r14.w = asfloat(_RcPfR[(uint(asint(r14.y)) * 1u) + (uint(0) >> 2u)].x);
+                                r14.w *= r14.z;
+                                r13.x += r14.w;
+                                r14.w = asfloat(asint(r14.y) + asint(_RcN));
+                                r14.w = asfloat(_RcPfR[(uint(asint(r14.w)) * 1u) + (uint(0) >> 2u)].x);
+                                r14.w *= r14.z;
+                                r13.y += r14.w;
+                                float2 _2101 = asfloat(asint(r3.yz) + asint(r14.yy));
+                                r15 = float4(_2101.x, _2101.y, r15.z, r15.w);
+                                r14.w = asfloat(_RcPfR[(uint(asint(r15.x)) * 1u) + (uint(0) >> 2u)].x);
+                                r14.w *= r14.z;
+                                r14.y = asfloat((3 * asint(_RcN)) + asint(r14.y));
+                                r14.y = asfloat(_RcPfR[(uint(asint(r14.y)) * 1u) + (uint(0) >> 2u)].x);
+                                r14.y *= r14.z;
+                                float2 _2153 = r13.zw + r14.wy;
+                                r13 = float4(r13.x, r13.y, _2153.x, _2153.y);
+                                r14.y = asfloat(_RcPfR[(uint(asint(r15.y)) * 1u) + (uint(0) >> 2u)].x);
+                                r14.y *= r14.z;
+                                r12.z += r14.y;
+                                r14.x = asfloat(asint(r14.x) + 1);
+                                continue;
+                            }
+                            r10 = r13;
+                            r11 = float4(r12.z, r12.w, r11.z, r11.w);
+                            r11.z = asfloat(asint(r11.w) + 1);
+                            continue;
+                        }
+                        r8 = r10;
+                        r7 = float4(r7.x, r11.x, r11.y, r7.w);
+                        r7.w = asfloat(asint(r7.w) + 1);
+                        continue;
+                    }
+                    r5 = r8;
+                    r0.w = r7.y;
+                    r2.w = r7.z;
+                    r6.x = asfloat(asint(r6.x) + 1);
+                    continue;
+                }
+                r0.z = asfloat((9.9999996826552253889678874634872e-21f < r2.w) ? 4294967295u : 0u);
+                r1 = r5 / r2.wwww;
+                r2.x = r0.w / r2.w;
+                uint4 _2234 = asuint(r0.zzzz);
+                bool4 _2239 = bool4(_2234.x != uint4(0u, 0u, 0u, 0u).x, _2234.y != uint4(0u, 0u, 0u, 0u).y, _2234.z != uint4(0u, 0u, 0u, 0u).z, _2234.w != uint4(0u, 0u, 0u, 0u).w);
+                r1 = float4(_2239.x ? r1.x : r5.x, _2239.y ? r1.y : r5.y, _2239.z ? r1.z : r5.z, _2239.w ? r1.w : r5.w);
+                r0.z = (asuint(r0.z) != 0u) ? r2.x : r0.w;
+                _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x).x;
+                r0.w = asfloat(asint(r0.y) + asint(_RcBlockTotal));
+                _RcBlock[(uint(asint(r0.w)) * 1u) + (uint(0) >> 2u)] = asuint(r1.y).x;
+                float2 _2288 = asfloat(asint(int2(_RcBlockTotal)) << int2(1, 2));
+                r1 = float4(_2288.x, _2288.y, r1.z, r1.w);
+                float2 _2298 = asfloat(asint(r0.yy) + asint(r1.xy));
+                r1 = float4(_2298.x, _2298.y, r1.z, r1.w);
+                _RcBlock[(uint(asint(r1.x)) * 1u) + (uint(0) >> 2u)] = asuint(r1.z).x;
+                r0.y = asfloat((3 * asint(_RcBlockTotal)) + asint(r0.y));
+                _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r1.w).x;
+                _RcBlock[(uint(asint(r1.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.z).x;
+                uint _2347;
+                InterlockedAdd(g0_017[uint(0) >> 2u], 1u, _2347);
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat(g0_017[uint(0) >> 2u]);
+    r0.z = asfloat((asint(r0.y) != 0) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.z) & asuint(r0.x));
+    if (asuint(r0.x) != 0u)
+    {
+        uint _2382;
+        InterlockedAdd(_RcSync[(uint(4) * 1u) + (uint(0) >> 2u)], asuint(r0.y), _2382);
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KReconBlockDilate(uint3 gl_GlobalInvocationID : SV_DispatchThreadID, uint3 gl_LocalInvocationID : SV_GroupThreadID)
+{
+    groupshared uint g0_018[1];
+
+    float4 r0;
+    r0.x = asfloat((int(gl_LocalInvocationID.x) == 0) ? 4294967295u : 0u);
+    if (uint(int(gl_LocalInvocationID.x)) == 0u)
+    {
+        g0_018[0u >> 2u] = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.y = asfloat(asint(r0.y) + asint(_DispOffset));
+    r0.z = asfloat((asuint(r0.y) < asuint(_RcBlockTotal)) ? 4294967295u : 0u);
+    if (asuint(r0.z) != 0u)
+    {
+        r0.z = 0.0f;
+        r0.w = _RcNumBodies;
+        float4 r1;
+        for (;;)
+        {
+            r1.x = asfloat((-asint(r0.z)) + asint(r0.w));
+            r1.x = asfloat((1u >= asuint(r1.x)) ? 4294967295u : 0u);
+            if (asuint(r1.x) != 0u)
+            {
+                break;
+            }
+            r1.x = asfloat(asint(r0.w) + asint(r0.z));
+            r1.x = asfloat(asuint(r1.x) >> 1u);
+            r1.y = asfloat(_RcBlockBaseR[(uint(asint(r1.x)) * 1u) + (uint(0) >> 2u)].x);
+            r1.y = asfloat((asuint(r0.y) >= asuint(r1.y)) ? 4294967295u : 0u);
+            r0.z = (asuint(r1.y) != 0u) ? r1.x : r0.z;
+            r0.w = (asuint(r1.y) != 0u) ? r0.w : r1.x;
+            continue;
+        }
+        uint _203 = (uint(asint(r0.z)) * 20u) + (uint(44) >> 2u);
+        r1 = asfloat(uint4(_RcBodyR[_203].x, _RcBodyR[_203 + 1u].x, _RcBodyR[_203 + 2u].x, _RcBodyR[_203 + 3u].x));
+        float4 r2;
+        r2.x = asfloat(_RcBodyR[(uint(asint(r0.z)) * 20u) + (uint(76) >> 2u)].x);
+        r2.x = asfloat(asuint(r2.x) & 1u);
+        r1.y = asfloat(asint(r1.z) * asint(r1.y));
+        r1.y = asfloat(asint(r1.w) * asint(r1.y));
+        r1.y = (asuint(r2.x) != 0u) ? r1.y : 0.0f;
+        r1.z = asfloat((asuint(r0.y) >= asuint(r1.x)) ? 4294967295u : 0u);
+        r1.y = asfloat(asint(r1.y) + asint(r1.x));
+        r1.y = asfloat((asuint(r0.y) < asuint(r1.y)) ? 4294967295u : 0u);
+        r1.y = asfloat(asuint(r1.y) & asuint(r1.z));
+        r0.w = asfloat(asint(r0.y) + (-asint(r1.x)));
+        uint2 _313 = asuint(r1.yy);
+        bool2 _320 = bool2(_313.x != uint2(0u, 0u).x, _313.y != uint2(0u, 0u).y);
+        float2 _321 = float2(_320.x ? r0.wz.x : float2(0.0f, asfloat(0xffffffffu /* nan */)).x, _320.y ? r0.wz.y : float2(0.0f, asfloat(0xffffffffu /* nan */)).y);
+        r0 = float4(r0.x, r0.y, _321.x, _321.y);
+        r1.x = asfloat((asint(r0.w) >= 0) ? 4294967295u : 0u);
+        if (asuint(r1.x) != 0u)
+        {
+            r1.x = asfloat(asint(r0.w) * 6);
+            r1.y = asfloat((asint(r0.w) * 6) + 1);
+            r1.y = asfloat(_RcExtentR[(uint(asint(r1.y)) * 1u) + (uint(0) >> 2u)].x);
+            r1.z = asfloat((asint(r1.y) >= 0) ? 4294967295u : 0u);
+            if (asuint(r1.z) != 0u)
+            {
+                r1.x = asfloat(_RcExtentR[(uint(asint(r1.x)) * 1u) + (uint(0) >> 2u)].x);
+                r2 = asfloat((asint(r0.wwww) * int4(6, 6, 6, 6)) + int4(2, 3, 4, 5));
+                r1.z = asfloat(_RcExtentR[(uint(asint(r2.x)) * 1u) + (uint(0) >> 2u)].x);
+                r1.w = asfloat(_RcExtentR[(uint(asint(r2.y)) * 1u) + (uint(0) >> 2u)].x);
+                r2.x = asfloat(_RcExtentR[(uint(asint(r2.z)) * 1u) + (uint(0) >> 2u)].x);
+                r2.y = asfloat(_RcExtentR[(uint(asint(r2.w)) * 1u) + (uint(0) >> 2u)].x);
+                uint _450 = (uint(asint(r0.w)) * 20u) + (uint(44) >> 2u);
+                float4 r3 = asfloat(uint4(_RcBodyR[_450].x, _RcBodyR[_450 + 1u].x, _RcBodyR[_450 + 2u].x, _RcBodyR[_450 + 3u].x));
+                uint _466 = asuint(r0.z);
+                uint _469 = asuint(r3.y);
+                bool _470 = _469 != 0u;
+                float4 r4;
+                r4.x = asfloat(_470 ? (_466 / _469) : 4294967295u);
+                float4 r5;
+                r5.x = asfloat(_470 ? (_466 % _469) : 4294967295u);
+                uint _484 = asuint(r3.z);
+                r0.w = asfloat((_484 != 0u) ? (asuint(r4.x) % _484) : 4294967295u);
+                r2.z = asfloat(asint(r3.z) * asint(r3.y));
+                uint _504 = asuint(r2.z);
+                r0.z = asfloat((_504 != 0u) ? (asuint(r0.z) / _504) : 4294967295u);
+                r2.z = asfloat(_RcMaskPrevR[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)].x);
+                _RcMaskOut[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r2.z).x;
+                r2.w = asfloat(asint(_RcPass) + 1);
+                r2.w = (asuint(_RcDilateSpanSab) != 0u) ? _RcPass : r2.w;
+                r2.x = asfloat((-asint(r2.w)) + asint(r2.x));
+                r4.x = asfloat(max(asint(r2.x), 0));
+                float3 _576 = asfloat(asint(r3.wzy) + int3(-1, -1, -1));
+                float4 r6;
+                r6 = float4(_576.x, _576.y, _576.z, r6.w);
+                r2.x = asfloat(asint(r2.w) + asint(r2.y));
+                r4.y = asfloat(min(asint(r2.x), asint(r6.x)));
+                float2 _606 = asfloat(asint(r1.xz) + (-asint(r2.ww)));
+                r1 = float4(_606.x, r1.y, _606.y, r1.w);
+                r4.z = asfloat(max(asint(r1.z), 0));
+                r1.z = asfloat(asint(r1.w) + asint(r2.w));
+                r4.w = asfloat(min(asint(r1.z), asint(r6.y)));
+                r2.x = asfloat(max(asint(r1.x), 0));
+                r1.x = asfloat(asint(r1.y) + asint(r2.w));
+                r2.y = asfloat(min(asint(r1.x), asint(r6.z)));
+                r6.w = 0.0f;
+                uint4 _662 = asuint(int4(_RcWholeWindow));
+                bool4 _668 = bool4(_662.x != uint4(0u, 0u, 0u, 0u).x, _662.y != uint4(0u, 0u, 0u, 0u).y, _662.z != uint4(0u, 0u, 0u, 0u).z, _662.w != uint4(0u, 0u, 0u, 0u).w);
+                r1 = float4(_668.x ? r6.wxwy.x : r4.x, _668.y ? r6.wxwy.y : r4.y, _668.z ? r6.wxwy.z : r4.z, _668.w ? r6.wxwy.w : r4.w);
+                uint2 _673 = asuint(int2(_RcWholeWindow));
+                bool2 _678 = bool2(_673.x != uint2(0u, 0u).x, _673.y != uint2(0u, 0u).y);
+                float2 _679 = float2(_678.x ? r6.wz.x : r2.xy.x, _678.y ? r6.wz.y : r2.xy.y);
+                r2 = float4(_679.x, _679.y, r2.z, r2.w);
+                r2.x = asfloat((asint(r5.x) >= asint(r2.x)) ? 4294967295u : 0u);
+                r2.y = asfloat((asint(r2.y) >= asint(r5.x)) ? 4294967295u : 0u);
+                r2.x = asfloat(asuint(r2.y) & asuint(r2.x));
+                int2 _713 = asint(r0.zw);
+                int2 _716 = asint(r1.xz);
+                bool2 _717 = bool2(_713.x >= _716.x, _713.y >= _716.y);
+                float2 _720 = asfloat(uint2(_717.x ? uint2(4294967295u, 4294967295u).x : uint2(0u, 0u).x, _717.y ? uint2(4294967295u, 4294967295u).y : uint2(0u, 0u).y));
+                r1 = float4(_720.x, r1.y, _720.y, r1.w);
+                r1.z = asfloat(asuint(r1.z) & asuint(r2.x));
+                int2 _734 = asint(r1.yw);
+                int2 _737 = asint(r0.zw);
+                bool2 _738 = bool2(_734.x >= _737.x, _734.y >= _737.y);
+                float2 _740 = asfloat(uint2(_738.x ? uint2(4294967295u, 4294967295u).x : uint2(0u, 0u).x, _738.y ? uint2(4294967295u, 4294967295u).y : uint2(0u, 0u).y));
+                r1 = float4(r1.x, _740.x, r1.z, _740.y);
+                r1.z = asfloat(asuint(r1.w) & asuint(r1.z));
+                r1.x = asfloat(asuint(r1.x) & asuint(r1.z));
+                r1.x = asfloat(asuint(r1.y) & asuint(r1.x));
+                r1.y = asfloat((asint(r2.z) == 0) ? 4294967295u : 0u);
+                r1.x = asfloat(asuint(r1.y) & asuint(r1.x));
+                if (asuint(r1.x) != 0u)
+                {
+                    float2 _798 = asfloat(asint(int2(_RcBlockTotal)) << int2(1, 2));
+                    r1 = float4(_798.x, _798.y, r1.z, r1.w);
+                    r1 = float4(r1.x, r1.y, 0.0f.xx.x, 0.0f.xx.y);
+                    r2 = 0.0f.xxxx;
+                    r4.x = 0.0f;
+                    for (;;)
+                    {
+                        r4.y = asfloat((asint(r4.x) >= 6) ? 4294967295u : 0u);
+                        if (asuint(r4.y) != 0u)
+                        {
+                            break;
+                        }
+                        int4 _824 = asint(r4.xxxx);
+                        bool4 _826 = bool4(_824.x == int4(1, 2, 3, 4).x, _824.y == int4(1, 2, 3, 4).y, _824.z == int4(1, 2, 3, 4).z, _824.w == int4(1, 2, 3, 4).w);
+                        r6 = asfloat(uint4(_826.x ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).x : uint4(0u, 0u, 0u, 0u).x, _826.y ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).y : uint4(0u, 0u, 0u, 0u).y, _826.z ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).z : uint4(0u, 0u, 0u, 0u).z, _826.w ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).w : uint4(0u, 0u, 0u, 0u).w));
+                        r4.y = (asuint(r4.x) != 0u) ? r6.x : 1.4012984643248170709237295832899e-45f;
+                        r4.y = asfloat(asint(r4.y) + asint(r5.x));
+                        r4.z = (asuint(r6.y) != 0u) ? 1.4012984643248170709237295832899e-45f : r6.z;
+                        r4.w = asfloat((asint(r4.x) == 5) ? 4294967295u : 0u);
+                        r4.w = (asuint(r6.w) != 0u) ? 1.4012984643248170709237295832899e-45f : r4.w;
+                        float2 _878 = asfloat(asint(r0.wz) + asint(r4.zw));
+                        r4 = float4(r4.x, r4.y, _878.x, _878.y);
+                        int2 _883 = asint(r4.yz);
+                        bool2 _885 = bool2(_883.x < int2(0, 0).x, _883.y < int2(0, 0).y);
+                        float2 _887 = asfloat(uint2(_885.x ? uint2(4294967295u, 4294967295u).x : uint2(0u, 0u).x, _885.y ? uint2(4294967295u, 4294967295u).y : uint2(0u, 0u).y));
+                        r5 = float4(r5.x, _887.x, _887.y, r5.w);
+                        r5.y = asfloat(asuint(r5.z) | asuint(r5.y));
+                        r5.z = asfloat((asint(r4.w) < 0) ? 4294967295u : 0u);
+                        r5.y = asfloat(asuint(r5.z) | asuint(r5.y));
+                        r5.z = asfloat((asint(r4.y) >= asint(r3.y)) ? 4294967295u : 0u);
+                        r5.y = asfloat(asuint(r5.z) | asuint(r5.y));
+                        r5.z = asfloat((asint(r4.z) >= asint(r3.z)) ? 4294967295u : 0u);
+                        r5.y = asfloat(asuint(r5.z) | asuint(r5.y));
+                        r5.z = asfloat((asint(r4.w) >= asint(r3.w)) ? 4294967295u : 0u);
+                        r5.y = asfloat(asuint(r5.z) | asuint(r5.y));
+                        if (asuint(r5.y) != 0u)
+                        {
+                            r5.y = asfloat(asint(r4.x) + 1);
+                            r4.x = r5.y;
+                            continue;
+                        }
+                        r4.y = asfloat((asint(r4.z) * asint(r3.y)) + asint(r4.y));
+                        r4.z = asfloat(asint(r3.y) * asint(r4.w));
+                        r4.y = asfloat((asint(r4.z) * asint(r3.z)) + asint(r4.y));
+                        r4.y = asfloat(asint(r3.x) + asint(r4.y));
+                        r4.z = asfloat(_RcMaskPrevR[(uint(asint(r4.y)) * 1u) + (uint(0) >> 2u)].x);
+                        if (asuint(r4.z) == 0u)
+                        {
+                            r4.z = asfloat(asint(r4.x) + 1);
+                            r4.x = r4.z;
+                            continue;
+                        }
+                        r1.z = asfloat(asint(r1.z) + 1);
+                        r4.z = asfloat(_RcBlock[(uint(asint(r4.y)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                        r1.w += r4.z;
+                        r4.z = asfloat(asint(r4.y) + asint(_RcBlockTotal));
+                        r4.z = asfloat(_RcBlock[(uint(asint(r4.z)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                        r2.x += r4.z;
+                        float2 _1114 = asfloat(asint(r1.xy) + asint(r4.yy));
+                        r4 = float4(r4.x, r4.y, _1114.x, _1114.y);
+                        r4.z = asfloat(_RcBlock[(uint(asint(r4.z)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                        r4.y = asfloat((3 * asint(_RcBlockTotal)) + asint(r4.y));
+                        r4.y = asfloat(_RcBlock[(uint(asint(r4.y)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                        float2 _1154 = r2.yz + r4.zy;
+                        r2 = float4(r2.x, _1154.x, _1154.y, r2.w);
+                        r4.y = asfloat(_RcBlock[(uint(asint(r4.w)) * 1u) + (uint(0) >> 2u)].xxxx.x);
+                        r2.w += r4.y;
+                        r4.x = asfloat(asint(r4.x) + 1);
+                        continue;
+                    }
+                    if (asuint(r1.z) != 0u)
+                    {
+                        _RcMaskOut[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = uint4(1u, 1u, 1u, 1u).x;
+                        r0.z = asfloat(asuint(r1.z));
+                        r0.w = r1.w / r0.z;
+                        _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.w).x;
+                        r0.w = asfloat(asint(r0.y) + asint(_RcBlockTotal));
+                        r1.z = r2.x / r0.z;
+                        _RcBlock[(uint(asint(r0.w)) * 1u) + (uint(0) >> 2u)] = asuint(r1.z).x;
+                        float2 _1250 = asfloat(asint(r0.yy) + asint(r1.xy));
+                        r1 = float4(_1250.x, _1250.y, r1.z, r1.w);
+                        r0.w = r2.y / r0.z;
+                        _RcBlock[(uint(asint(r1.x)) * 1u) + (uint(0) >> 2u)] = asuint(r0.w).x;
+                        r0.y = asfloat((3 * asint(_RcBlockTotal)) + asint(r0.y));
+                        r0.w = r2.z / r0.z;
+                        _RcBlock[(uint(asint(r0.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.w).x;
+                        r0.y = r2.w / r0.z;
+                        _RcBlock[(uint(asint(r1.y)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+                        uint _1317;
+                        InterlockedAdd(g0_018[uint(0) >> 2u], 1u, _1317);
+                    }
+                }
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    r0.y = asfloat(g0_018[uint(0) >> 2u]);
+    r0.z = asfloat((asint(r0.y) != 0) ? 4294967295u : 0u);
+    r0.x = asfloat(asuint(r0.z) & asuint(r0.x));
+    if (asuint(r0.x) != 0u)
+    {
+        uint _1353;
+        InterlockedAdd(_RcSync[(uint(5) * 1u) + (uint(0) >> 2u)], asuint(r0.y), _1353);
+    }
+}
+
+[numthreads(256, 1, 1)]
+void KReconVertexFields(uint3 gl_GlobalInvocationID : SV_DispatchThreadID)
+{
+    float4 r0;
+    r0.x = asfloat((int(gl_GlobalInvocationID.y) * asint(_DispStrideX)) + int(gl_GlobalInvocationID.x));
+    r0.x = asfloat(asint(r0.x) + asint(_DispOffset));
+    r0.y = asfloat((asuint(r0.x) >= asuint(_RcVertCount)) ? 4294967295u : 0u);
+    if (asuint(r0.y) != 0u)
+    {
+        return;
+    }
+    uint _107 = (uint(asint(_RcBody)) * 20u) + (uint(0) >> 2u);
+    float4 r1 = asfloat(uint4(_RcBodyR[_107].x, _RcBodyR[_107 + 1u].x, _RcBodyR[_107 + 2u].x, _RcBodyR[_107 + 3u].x));
+    uint _130 = (uint(asint(_RcBody)) * 20u) + (uint(16) >> 2u);
+    float4 r2 = asfloat(uint4(_RcBodyR[_130].x, _RcBodyR[_130 + 1u].x, _RcBodyR[_130 + 2u].x, _RcBodyR[_130 + 3u].x));
+    uint _152 = (uint(asint(_RcBody)) * 20u) + (uint(32) >> 2u);
+    float2 _161 = asfloat(uint2(_RcBodyR[_152].x, _RcBodyR[_152 + 1u].x));
+    r0 = float4(r0.x, _161.x, _161.y, r0.w);
+    uint _170 = (uint(asint(r0.x)) * 3u) + (uint(0) >> 2u);
+    float3 _182 = asfloat(uint3(_RcVertsR[_170].x, _RcVertsR[_170 + 1u].x, _RcVertsR[_170 + 2u].x));
+    float4 r3;
+    r3 = float4(_182.x, _182.y, _182.z, r3.w);
+    float3 _190 = (-r1.xyz) + r3.xyz;
+    r1 = float4(_190.x, _190.y, _190.z, r1.w);
+    float3 _197 = r1.xyz / r1.www;
+    r1 = float4(_197.x, _197.y, _197.z, r1.w);
+    float3 _203 = asfloat(int3(r1.xyz));
+    r1 = float4(_203.x, _203.y, _203.z, r1.w);
+    float3 _212 = asfloat(asint(r2.xyz) + int3(-1, -1, -1));
+    float4 r4;
+    r4 = float4(_212.x, _212.y, _212.z, r4.w);
+    float3 _221 = asfloat(max(asint(r1.xyz), int3(0, 0, 0)));
+    r1 = float4(_221.x, _221.y, _221.z, r1.w);
+    float3 _231 = asfloat(min(asint(r4.xyz), asint(r1.xyz)));
+    r1 = float4(_231.x, _231.y, _231.z, r1.w);
+    r0.w = asfloat((asint(_RcMutTap) != 0) ? 4294967295u : 0u);
+    float2 _252 = asfloat(asint(int2(_RcN)) << int2(1, 2));
+    r4 = float4(_252.x, _252.y, r4.z, r4.w);
+    float4 r5 = 0.0f.xxxx;
+    r3.w = 0.0f;
+    r4 = float4(r4.x, r4.y, float2(0.0f, asfloat(0xfffffffeu /* nan */)).x, float2(0.0f, asfloat(0xfffffffeu /* nan */)).y);
+    float4 r6;
+    float4 r8;
+    float4 r9;
+    float4 r11;
+    float4 r12;
+    float4 r13;
+    float4 r14;
+    float4 r15;
+    float4 r17;
+    float4 r18;
+    for (;;)
+    {
+        r6.x = asfloat((2 < asint(r4.w)) ? 4294967295u : 0u);
+        if (asuint(r6.x) != 0u)
+        {
+            break;
+        }
+        r6.x = asfloat(asint(r1.z) + asint(r4.w));
+        r6.y = asfloat((asint(r6.x) < 0) ? 4294967295u : 0u);
+        r6.z = asfloat((asint(r6.x) >= asint(r2.z)) ? 4294967295u : 0u);
+        r6.w = asfloat(asint(r6.x) >> 3);
+        r6.w = asfloat(asint(r0.y) * asint(r6.w));
+        r6.x = asfloat(spvBitfieldInsert(0u, asuint(r6.x), 6u & 31u, 3u & 31u));
+        float4 r7 = r5;
+        r8.x = r3.w;
+        r8.y = r4.z;
+        r8.z = asfloat(0xfffffffeu /* nan */);
+        for (;;)
+        {
+            r8.w = asfloat((2 < asint(r8.z)) ? 4294967295u : 0u);
+            if (asuint(r8.w) != 0u)
+            {
+                break;
+            }
+            r8.w = asfloat(asint(r1.y) + asint(r8.z));
+            r9.x = asfloat((asint(r8.w) < 0) ? 4294967295u : 0u);
+            r9.y = asfloat((asint(r8.w) >= asint(r2.y)) ? 4294967295u : 0u);
+            r9.z = asfloat(asint(r8.w) >> 3);
+            r8.w = asfloat(spvBitfieldInsert(0u, asuint(r8.w), 3u & 31u, 3u & 31u));
+            float4 r10 = r7;
+            r9.w = r8.x;
+            r11.x = r8.y;
+            r11.y = asfloat(0xfffffffeu /* nan */);
+            for (;;)
+            {
+                r11.z = asfloat((2 < asint(r11.y)) ? 4294967295u : 0u);
+                if (asuint(r11.z) != 0u)
+                {
+                    break;
+                }
+                r11.z = asfloat((asint(r11.y) == 2) ? 4294967295u : 0u);
+                r11.z = asfloat(asuint(r0.w) & asuint(r11.z));
+                if (asuint(r11.z) != 0u)
+                {
+                    r11 = float4(r11.x, 4.2038953929744512127711887498697e-45f.xx.x, 4.2038953929744512127711887498697e-45f.xx.y, r11.w);
+                    continue;
+                }
+                else
+                {
+                    r11.z = r11.y;
+                }
+                r11.w = asfloat(asint(r1.x) + asint(r11.z));
+                r12.x = asfloat((asint(r11.w) < 0) ? 4294967295u : 0u);
+                r12.x = asfloat(asuint(r9.x) | asuint(r12.x));
+                r12.x = asfloat(asuint(r6.y) | asuint(r12.x));
+                r12.y = asfloat((asint(r11.w) >= asint(r2.x)) ? 4294967295u : 0u);
+                r12.x = asfloat(asuint(r12.y) | asuint(r12.x));
+                r12.x = asfloat(asuint(r9.y) | asuint(r12.x));
+                r12.x = asfloat(asuint(r6.z) | asuint(r12.x));
+                if (asuint(r12.x) != 0u)
+                {
+                    r11.y = asfloat(asint(r11.z) + 1);
+                    continue;
+                }
+                r12.x = asfloat(asint(r11.w) >> 3);
+                r12.x = asfloat((asint(r9.z) * asint(r0.y)) + asint(r12.x));
+                r12.x = asfloat((asint(r6.w) * asint(r0.z)) + asint(r12.x));
+                r12.x = asfloat(asint(r2.w) + asint(r12.x));
+                r12.x = asfloat(_RcBrickR[(uint(asint(r12.x)) * 1u) + (uint(0) >> 2u)].x);
+                r12.y = asfloat((asint(r12.x) >= 0) ? 4294967295u : 0u);
+                r11.w = asfloat(spvBitfieldInsert(asuint(r8.w), asuint(r11.w), 0u & 31u, 3u & 31u));
+                r11.w = asfloat(asint(r6.x) + asint(r11.w));
+                r11.w = asfloat(spvBitfieldInsert(asuint(r11.w), asuint(r12.x), 9u & 31u, 23u & 31u));
+                r13.x = asfloat(_RcSlotStartR[(uint(asint(r11.w)) * 1u) + (uint(0) >> 2u)].x);
+                r11.w = asfloat(asint(r11.w) + 1);
+                r13.y = asfloat(_RcSlotStartR[(uint(asint(r11.w)) * 1u) + (uint(0) >> 2u)].x);
+                float2 _655 = asfloat(asuint(r12.yy) & asuint(r13.xy));
+                r12 = float4(_655.x, _655.y, r12.z, r12.w);
+                r13 = r10;
+                r11.w = r9.w;
+                r12.z = r11.x;
+                r12.w = r12.x;
+                for (;;)
+                {
+                    r14.x = asfloat((asuint(r12.w) >= asuint(r12.y)) ? 4294967295u : 0u);
+                    if (asuint(r14.x) != 0u)
+                    {
+                        break;
+                    }
+                    r14.x = asfloat(_RcOrderR[(uint(asint(r12.w)) * 1u) + (uint(0) >> 2u)].x);
+                    uint _703 = (uint(asint(r14.x)) * 3u) + (uint(0) >> 2u);
+                    float3 _713 = asfloat(uint3(_RcPosR[_703].x, _RcPosR[_703 + 1u].x, _RcPosR[_703 + 2u].x));
+                    r14 = float4(r14.x, _713.x, _713.y, _713.z);
+                    float3 _721 = (-r3.xyz) + r14.yzw;
+                    r14 = float4(r14.x, _721.x, _721.y, _721.z);
+                    float3 _728 = r14.yzw / r1.www;
+                    r14 = float4(r14.x, _728.x, _728.y, _728.z);
+                    float3 _737 = abs(r14.yzw) * abs(r14.yzw);
+                    r15 = float4(_737.x, _737.y, _737.z, r15.w);
+                    float3 _745 = (-r15.xyz) + 0.75f.xxx;
+                    r15 = float4(_745.x, _745.y, _745.z, r15.w);
+                    float4 _750 = abs(r14.yyzz);
+                    bool4 _755 = bool4(_750.x < float4(0.5f, 1.5f, 0.5f, 1.5f).x, _750.y < float4(0.5f, 1.5f, 0.5f, 1.5f).y, _750.z < float4(0.5f, 1.5f, 0.5f, 1.5f).z, _750.w < float4(0.5f, 1.5f, 0.5f, 1.5f).w);
+                    float4 r16 = asfloat(uint4(_755.x ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).x : uint4(0u, 0u, 0u, 0u).x, _755.y ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).y : uint4(0u, 0u, 0u, 0u).y, _755.z ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).z : uint4(0u, 0u, 0u, 0u).z, _755.w ? uint4(4294967295u, 4294967295u, 4294967295u, 4294967295u).w : uint4(0u, 0u, 0u, 0u).w));
+                    float3 _765 = (-abs(r14.yzw)) + 1.5f.xxx;
+                    r17 = float4(_765.x, _765.y, _765.z, r17.w);
+                    float3 _771 = r17.xyz * 0.5f.xxx;
+                    r18 = float4(_771.x, _771.y, _771.z, r18.w);
+                    float3 _778 = r17.xyz * r18.xyz;
+                    r17 = float4(_778.x, _778.y, _778.z, r17.w);
+                    float2 _788 = asfloat(asuint(r16.yw) & asuint(r17.xy));
+                    r14 = float4(r14.x, _788.x, _788.y, r14.w);
+                    uint2 _793 = asuint(r16.xz);
+                    bool2 _800 = bool2(_793.x != uint2(0u, 0u).x, _793.y != uint2(0u, 0u).y);
+                    float2 _801 = float2(_800.x ? r15.xy.x : r14.yz.x, _800.y ? r15.xy.y : r14.yz.y);
+                    r14 = float4(r14.x, _801.x, _801.y, r14.w);
+                    r14.y = r14.z * r14.y;
+                    float2 _812 = abs(r14.ww);
+                    bool2 _814 = bool2(_812.x < float2(0.5f, 1.5f).x, _812.y < float2(0.5f, 1.5f).y);
+                    float2 _817 = asfloat(uint2(_814.x ? uint2(4294967295u, 4294967295u).x : uint2(0u, 0u).x, _814.y ? uint2(4294967295u, 4294967295u).y : uint2(0u, 0u).y));
+                    r14 = float4(r14.x, r14.y, _817.x, _817.y);
+                    r14.w = asfloat(asuint(r17.z) & asuint(r14.w));
+                    r14.z = (asuint(r14.z) != 0u) ? r15.z : r14.w;
+                    r14.y = r14.z * r14.y;
+                    r14.z = asfloat((0.0f >= r14.y) ? 4294967295u : 0u);
+                    if (asuint(r14.z) != 0u)
+                    {
+                        r14.z = asfloat(asint(r12.w) + 1);
+                        r12.w = r14.z;
+                        continue;
+                    }
+                    r12.z += r14.y;
+                    r14.z = asfloat(_RcPfR[(uint(asint(r14.x)) * 1u) + (uint(0) >> 2u)].x);
+                    r14.z *= r14.y;
+                    r13.x += r14.z;
+                    r14.z = asfloat(asint(r14.x) + asint(_RcN));
+                    r14.z = asfloat(_RcPfR[(uint(asint(r14.z)) * 1u) + (uint(0) >> 2u)].x);
+                    r14.z *= r14.y;
+                    r13.y += r14.z;
+                    float2 _935 = asfloat(asint(r4.xy) + asint(r14.xx));
+                    r14 = float4(r14.x, r14.y, _935.x, _935.y);
+                    r14.z = asfloat(_RcPfR[(uint(asint(r14.z)) * 1u) + (uint(0) >> 2u)].x);
+                    r14.z *= r14.y;
+                    r14.x = asfloat((3 * asint(_RcN)) + asint(r14.x));
+                    r14.x = asfloat(_RcPfR[(uint(asint(r14.x)) * 1u) + (uint(0) >> 2u)].x);
+                    r14.x *= r14.y;
+                    float2 _987 = r13.zw + r14.zx;
+                    r13 = float4(r13.x, r13.y, _987.x, _987.y);
+                    r14.x = asfloat(_RcPfR[(uint(asint(r14.w)) * 1u) + (uint(0) >> 2u)].x);
+                    r14.x *= r14.y;
+                    r11.w += r14.x;
+                    r12.w = asfloat(asint(r12.w) + 1);
+                    continue;
+                }
+                r10 = r13;
+                r9.w = r11.w;
+                r11.x = r12.z;
+                r11.y = asfloat(asint(r11.z) + 1);
+                continue;
+            }
+            r7 = r10;
+            r8.x = r9.w;
+            r8.y = r11.x;
+            r8.z = asfloat(asint(r8.z) + 1);
+            continue;
+        }
+        r5 = r7;
+        r3.w = r8.x;
+        r4.z = r8.y;
+        r4.w = asfloat(asint(r4.w) + 1);
+        continue;
+    }
+    r0.y = asfloat((9.9999996826552253889678874634872e-21f < r4.z) ? 4294967295u : 0u);
+    r1 = r5 / r4.zzzz;
+    r0.z = r3.w / r4.z;
+    uint4 _1074 = asuint(r0.yyyy);
+    bool4 _1077 = bool4(_1074.x != uint4(0u, 0u, 0u, 0u).x, _1074.y != uint4(0u, 0u, 0u, 0u).y, _1074.z != uint4(0u, 0u, 0u, 0u).z, _1074.w != uint4(0u, 0u, 0u, 0u).w);
+    r1 = float4(_1077.x ? r1.x : r5.x, _1077.y ? r1.y : r5.y, _1077.z ? r1.z : r5.z, _1077.w ? r1.w : r5.w);
+    r0.y = (asuint(r0.y) != 0u) ? r0.z : r3.w;
+    _RcVField[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r1.x).x;
+    r0.z = asfloat(asint(r0.x) + asint(_RcVertCount));
+    _RcVField[(uint(asint(r0.z)) * 1u) + (uint(0) >> 2u)] = asuint(r1.y).x;
+    float2 _1126 = asfloat(asint(int2(_RcVertCount)) << int2(1, 2));
+    r0 = float4(r0.x, r0.y, _1126.x, _1126.y);
+    float2 _1136 = asfloat(asint(r0.xx) + asint(r0.zw));
+    r0 = float4(r0.x, r0.y, _1136.x, _1136.y);
+    _RcVField[(uint(asint(r0.z)) * 1u) + (uint(0) >> 2u)] = asuint(r1.z).x;
+    r0.x = asfloat((3 * asint(_RcVertCount)) + asint(r0.x));
+    _RcVField[(uint(asint(r0.x)) * 1u) + (uint(0) >> 2u)] = asuint(r1.w).x;
+    _RcVField[(uint(asint(r0.w)) * 1u) + (uint(0) >> 2u)] = asuint(r0.y).x;
+}
+
+[numthreads(1, 1, 1)]
+void KReconSabTouch()
+{
+    float4 r0;
+    r0.x = asfloat(_SabVel[(uint(0) * 3u) + (uint(0) >> 2u)].xxxx.x);
+    r0.x += 0.001000000047497451305389404296875f;
+    _SabVel[(uint(0) * 3u) + (uint(0) >> 2u)] = asuint(r0.x).x;
+}
